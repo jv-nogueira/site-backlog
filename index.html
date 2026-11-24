@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7fb">
+  <title>Database | Workspace</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Workspace Database">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <span><strong>Workspace</strong><small>DATABASE</small></span>
+      </a>
+      <div class="topbar-actions">
+        <span id="connection-status" class="connection-status" aria-live="polite">Conectando...</span>
+      </div>
+    </header>
+
+    <section class="page-heading" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">WORKSPACE / DATABASE</p>
+        <h1 id="page-title">Database</h1>
+        <p class="page-description">Gerencie tarefas e acompanhe o trabalho do seu workspace.</p>
+      </div>
+      <div class="heading-actions">
+        <button id="cancel-changes" class="button button-secondary" type="button" disabled>Cancelar</button>
+        <button id="save-changes" class="button button-primary" type="button" disabled>Salvar alterações</button>
+        <button id="add-task" class="button button-primary" type="button">
+          <span aria-hidden="true">＋</span> Adicionar tarefa
+        </button>
+      </div>
+    </section>
+
+    <section class="card controls-card" aria-label="Filtros e colunas">
+      <div class="control-row">
+        <label class="search-field">
+          <span class="sr-only">Buscar tarefas</span>
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="search-input" type="search" placeholder="Buscar na Database..." autocomplete="off">
+        </label>
+        <div class="filter-group status-filters" aria-label="Filtrar por status">
+          <span class="control-label">Status</span>
+          <label class="check-option"><input type="checkbox" name="status-filter" value="Aberto" checked> Aberto</label>
+          <label class="check-option"><input type="checkbox" name="status-filter" value="Resolvido"> Resolvido</label>
+          <label class="check-option"><input type="checkbox" name="status-filter" value="Cancelado"> Cancelado</label>
+        </div>
+      </div>
+      <div class="control-row control-row-bottom">
+        <div class="filter-group">
+          <label class="check-option"><input id="projects-only" type="checkbox"> Somente projetos</label>
+          <label class="check-option"><input id="group-categories" type="checkbox"> Não mostrar “Categoria” duplicadas</label>
+        </div>
+        <details class="column-picker">
+          <summary>Colunas <span aria-hidden="true">▾</span></summary>
+          <div id="column-options" class="column-options" aria-label="Colunas visíveis"></div>
+        </details>
+      </div>
+    </section>
+
+    <section class="card table-card" aria-label="Tarefas da Database">
+      <div class="table-toolbar">
+        <p id="result-count" class="result-count" aria-live="polite">Carregando tarefas...</p>
+        <p class="edit-hint">As edições só serão gravadas após salvar.</p>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr id="table-head"></tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div id="empty-state" class="empty-state" hidden>
+          <span class="empty-icon" aria-hidden="true">▤</span>
+          <strong>Nenhuma tarefa encontrada</strong>
+          <span>Ajuste os filtros ou adicione uma nova tarefa.</span>
+        </div>
+      </div>
+    </section>
+    <p class="footer-note">Uma visão simples e organizada do seu trabalho.</p>
+  </main>
+
+  <dialog id="task-dialog" class="modal modal-wide">
+    <form id="task-form" method="dialog">
+      <div class="modal-heading">
+        <div><p class="eyebrow">NOVA ENTRADA</p><h2>Adicionar tarefa</h2></div>
+        <button class="icon-button" type="button" data-close="task-dialog" aria-label="Fechar">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="form-field"><span>Categoria</span><input name="Categoria" required maxlength="200"></label>
+        <label class="form-field"><span>Descrição</span><input name="Descrição" required maxlength="500"></label>
+        <label class="form-field"><span>Recebedor</span><input name="Recebedor" maxlength="200"></label>
+        <label class="form-field"><span>Preço total</span><input name="Preço total" type="number" step="0.01"></label>
+        <label class="form-field"><span>Status</span>
+          <select name="Status"><option>Aberto</option><option>Resolvido</option><option>Cancelado</option></select>
+        </label>
+        <label class="form-field form-checkbox"><input name="Projeto" type="checkbox"><span>Esta tarefa é um projeto</span></label>
+        <label class="form-field form-field-full"><span>Observação</span><textarea name="Observação" rows="3"></textarea></label>
+      </div>
+      <p class="modal-copy">A nova tarefa será adicionada no início da lista após salvar.</p>
+      <div class="modal-actions">
+        <button class="button button-secondary" type="button" data-close="task-dialog">Cancelar</button>
+        <button class="button button-primary" type="submit">Adicionar à lista</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="status-dialog" class="modal">
+    <form id="status-form" method="dialog">
+      <div class="modal-heading">
+        <div><p class="eyebrow">ATUALIZAR STATUS</p><h2>Observação</h2></div>
+        <button class="icon-button" type="button" data-close="status-dialog" aria-label="Fechar">×</button>
+      </div>
+      <p class="modal-copy">Revise a observação desta tarefa. Você pode mantê-la, alterá-la ou deixá-la vazia.</p>
+      <label class="form-field"><span>Observação</span><textarea id="status-observation" rows="4"></textarea></label>
+      <div class="modal-actions">
+        <button class="button button-secondary" type="button" id="cancel-status">Cancelar</button>
+        <button class="button button-primary" type="submit">Aplicar status</button>
+      </div>
+    </form>
+  </dialog>
+
+  <form id="transport-form" class="sr-only" method="post" target="transport-frame">
+    <input type="hidden" name="payload">
+  </form>
+  <iframe id="transport-frame" name="transport-frame" title="Conexão com o backend" class="sr-only"></iframe>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
