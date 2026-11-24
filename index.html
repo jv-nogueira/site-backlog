@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,6 +16,10 @@
         <span><strong>Workspace</strong><small>DATABASE</small></span>
       </a>
       <div class="topbar-actions">
+        <button id="theme-toggle" class="button button-secondary theme-toggle" type="button" aria-label="Alternar tema">
+          <span class="theme-icon" aria-hidden="true">🌙</span>
+          <span id="theme-text">Modo escuro</span>
+        </button>
         <span id="connection-status" class="connection-status" aria-live="polite">Conectando...</span>
       </div>
     </header>
@@ -54,17 +58,23 @@
           <label class="check-option"><input id="projects-only" type="checkbox"> Somente projetos</label>
           <label class="check-option"><input id="group-categories" type="checkbox"> Não mostrar “Categoria” duplicadas</label>
         </div>
-        <details class="column-picker">
-          <summary>Colunas <span aria-hidden="true">▾</span></summary>
-          <div id="column-options" class="column-options" aria-label="Colunas visíveis"></div>
-        </details>
+        <div class="control-actions">
+          <button id="clear-column-filters" class="button button-quiet" type="button" disabled>Limpar filtros de coluna</button>
+          <details class="column-picker">
+            <summary>Colunas <span aria-hidden="true">▾</span></summary>
+            <div id="column-options" class="column-options" aria-label="Colunas visíveis"></div>
+          </details>
+        </div>
       </div>
     </section>
 
     <section class="card table-card" aria-label="Tarefas da Database">
       <div class="table-toolbar">
-        <p id="result-count" class="result-count" aria-live="polite">Carregando tarefas...</p>
-        <p class="edit-hint">As edições só serão gravadas após salvar.</p>
+        <div class="result-summary">
+          <p id="result-count" class="result-count" aria-live="polite">Carregando tarefas...</p>
+          <div id="result-summary" class="result-stats" aria-live="polite"></div>
+        </div>
+        <p class="edit-hint">As edições só serão gravadas após salvar. Arraste o canto inferior direito de qualquer Descrição para expandir o texto.</p>
       </div>
       <div class="table-scroll">
         <table>
@@ -125,6 +135,37 @@
     <input type="hidden" name="payload">
   </form>
   <iframe id="transport-frame" name="transport-frame" title="Conexão com o backend" class="sr-only"></iframe>
+
+  <!-- Menu de Filtro por Coluna (Estilo Google Sheets) -->
+  <div id="column-filter-menu" class="column-filter-menu" role="dialog" aria-label="Filtro da coluna" hidden>
+    <div class="filter-menu-heading">
+      <strong id="column-filter-title">Coluna</strong>
+      <button id="close-column-filter" class="icon-button" type="button" aria-label="Fechar filtro">×</button>
+    </div>
+    <div class="filter-menu-sorting">
+      <button id="sort-asc-btn" type="button">
+        <span aria-hidden="true">↑</span> Classificar A a Z
+      </button>
+      <button id="sort-desc-btn" type="button">
+        <span aria-hidden="true">↓</span> Classificar Z a A
+      </button>
+    </div>
+    <div class="filter-menu-divider"></div>
+    <div class="filter-menu-selection">
+      <button id="select-all-values" type="button">Selecionar tudo</button>
+      <button id="clear-values" type="button">Limpar</button>
+    </div>
+    <label class="filter-menu-search">
+      <span class="sr-only">Pesquisar valores</span>
+      <input id="column-filter-search" type="search" placeholder="Pesquisar..." autocomplete="off">
+    </label>
+    <div id="column-filter-values" class="column-filter-values"></div>
+    <div class="filter-menu-actions">
+      <button id="reset-this-col-filter" class="button button-quiet" type="button">Redefinir</button>
+      <button id="apply-col-filter" class="button button-primary" type="button">OK</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
