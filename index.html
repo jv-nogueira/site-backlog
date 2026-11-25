@@ -74,7 +74,13 @@
       </div>
       <div class="control-row control-row-bottom">
         <div class="filter-group">
-          <label class="check-option"><input id="projects-only" type="checkbox"> Somente projetos</label>
+          <details id="projects-picker-details" class="column-picker">
+            <summary id="projects-picker-summary">Projetos <span aria-hidden="true">▾</span></summary>
+            <div id="projects-options" class="column-options" aria-label="Filtrar projetos">
+              <label class="check-option"><input id="filter-projects-true" type="checkbox" checked> Projetos</label>
+              <label class="check-option"><input id="filter-projects-false" type="checkbox" checked> Não projetos</label>
+            </div>
+          </details>
           <label class="check-option"><input id="group-categories" type="checkbox"> Não mostrar “Categoria” duplicadas</label>
         </div>
         <div class="control-actions">
@@ -225,23 +231,17 @@
           <div id="shortcut-cat-badges" class="shortcut-cat-badges"></div>
         </div>
 
-        <label class="form-field">
+        <div class="form-field">
           <span>Apenas Projetos</span>
-          <select id="shortcut-projects-select" name="Apenas-Projetos">
-            <option value="">Padrão do site</option>
-            <option value="TRUE">TRUE (Somente projetos)</option>
-            <option value="FALSE">FALSE (Ocultar projetos)</option>
-          </select>
-        </label>
+          <div class="shortcut-projects-checks">
+            <label class="check-option"><input type="checkbox" id="shortcut-projects-true" checked> Projetos</label>
+            <label class="check-option"><input type="checkbox" id="shortcut-projects-false" checked> Não projetos</label>
+          </div>
+        </div>
 
-        <label class="form-field">
-          <span>Categorias duplicadas</span>
-          <select id="shortcut-duplicate-select" name="Categorias-Duplicadas">
-            <option value="">Padrão do site</option>
-            <option value="TRUE">TRUE (Não mostrar duplicadas)</option>
-            <option value="FALSE">FALSE (Mostrar todas)</option>
-          </select>
-        </label>
+        <div class="form-field">
+          <label class="check-option"><input type="checkbox" id="shortcut-duplicate-checkbox"> Não mostrar "Categoria" duplicadas</label>
+        </div>
 
         <div class="form-field form-field-full">
           <span>Status selecionados (Vazio = padrão do site)</span>

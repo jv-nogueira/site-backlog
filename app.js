@@ -13,7 +13,7 @@
   ];
   const DEFAULT_COLUMNS = new Set(["Categoria", "Descrição", "Recebedor", "Preço total"]);
   const STATUSES = ["Aberto", "Resolvido", "Cancelado"];
-  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzBIU2Jrl9WDd3CV6ROgQYrQ9da6S_Uw7Givaqox0hz0RnxVLvryv69xWh3ccxb5S0r/exec";
+  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxvycYTRV4DUA7skOF-1gVcJfQC8QqEkssM1v80dMsk06FplrgjyLVPkXTyzgZjW6Pf/exec";
   const COLUMN_KEY = "workspace-database-visible-columns";
   const THEME_KEY = "workspace-database-theme";
   const BLANK_VALUE_KEY = "__BLANK_VALUE__";
@@ -234,13 +234,16 @@
     const statuses = new Set(
       Array.from(document.querySelectorAll('input[name="status-filter"]:checked')).map((input) => input.value)
     );
-    const onlyProjects = byId("projects-only").checked;
+    const showProjects = byId("filter-projects-true").checked;
+    const showNonProjects = byId("filter-projects-false").checked;
     const query = byId("search-input").value.trim().toLocaleLowerCase("pt-BR");
 
     let filtered = state.records.filter((record) => {
       const fields = currentFields(record);
       if (!statuses.has(fields.Status || "Aberto")) return false;
-      if (onlyProjects && !fields.Projeto) return false;
+      const isProj = Boolean(fields.Projeto);
+      if (isProj && !showProjects) return false;
+      if (!isProj && !showNonProjects) return false;
       if (!matchesColumnFilters(record)) return false;
       return !query || FIELDS.some((field) => escapeText(fields[field]).toLocaleLowerCase("pt-BR").includes(query));
     });
@@ -1575,12 +1578,17 @@
       state.columnFilters.delete("Categoria");
     }
 
-    // 2. Apenas projetos
+    // 2. Projetos / Não projetos
     const proj = String(f["Apenas-Projetos"] || "").trim().toUpperCase();
     if (proj === "TRUE" || proj === "VERDADEIRO") {
-      byId("projects-only").checked = true;
+      byId("filter-projects-true").checked = true;
+      byId("filter-projects-false").checked = false;
+    } else if (proj === "FALSE" || proj === "FALSO") {
+      byId("filter-projects-true").checked = false;
+      byId("filter-projects-false").checked = true;
     } else {
-      byId("projects-only").checked = false;
+      byId("filter-projects-true").checked = true;
+      byId("filter-projects-false").checked = true;
     }
 
     // 3. Status selecionados
@@ -1605,20 +1613,20 @@
       byId("group-categories").checked = false;
     }
 
-    // 5. Colunas
+    // 5. Colunas (quando definidas, aplicar exatamente essas colunas na ordem configurada)
     const rawCols = String(f["Colunas"] || "").trim();
     if (rawCols) {
       const cols = rawCols.split(",").map((s) => s.trim()).filter((col) => FIELDS.includes(col));
       if (cols.length > 0) {
         state.visibleColumns = new Set(cols);
+        // Reordenar: colunas do atalho primeiro (na ordem), depois as restantes
+        const remaining = FIELDS.filter((field) => !cols.includes(field));
+        state.columnOrder = cols.concat(remaining);
         localStorage.setItem(COLUMN_KEY, JSON.stringify(cols));
         renderColumnOptions();
       }
-    } else {
-      state.visibleColumns = new Set(DEFAULT_COLUMNS);
-      localStorage.setItem(COLUMN_KEY, JSON.stringify(Array.from(DEFAULT_COLUMNS)));
-      renderColumnOptions();
     }
+    // Quando Colunas está vazio, NÃO altera as colunas visíveis atuais
 
     state.expanded.clear();
     renderTable();
@@ -1639,13 +1647,30 @@
       "Apenas-Projetos": "",
       "Status-Selecionados": "",
       "Categorias-Duplicadas": "",
-      "Colunas": "",
+      "Colunas": "Categoria, Descrição, Status, Observação, Recebedor",
       "Ativar-Atalho": true
     };
 
     byId("shortcut-name-input").value = fields["Nome-Button"] || "";
-    byId("shortcut-projects-select").value = fields["Apenas-Projetos"] || "";
-    byId("shortcut-duplicate-select").value = fields["Categorias-Duplicadas"] || "";
+
+    // Preencher checkboxes de Apenas Projetos
+    const projVal = String(fields["Apenas-Projetos"] || "").trim().toUpperCase();
+    if (projVal === "TRUE" || projVal === "VERDADEIRO") {
+      byId("shortcut-projects-true").checked = true;
+      byId("shortcut-projects-false").checked = false;
+    } else if (projVal === "FALSE" || projVal === "FALSO") {
+      byId("shortcut-projects-true").checked = false;
+      byId("shortcut-projects-false").checked = true;
+    } else {
+      // Vazio = ambas marcadas (padrão)
+      byId("shortcut-projects-true").checked = true;
+      byId("shortcut-projects-false").checked = true;
+    }
+
+    // Preencher checkbox de Categorias Duplicadas
+    const dupVal = String(fields["Categorias-Duplicadas"] || "").trim().toUpperCase();
+    byId("shortcut-duplicate-checkbox").checked = (dupVal === "TRUE" || dupVal === "VERDADEIRO");
+
     byId("shortcut-active-switch").checked = (fields["Ativar-Atalho"] !== false);
 
     const statusSet = new Set(
@@ -1778,16 +1803,32 @@
     const name = byId("shortcut-name-input").value.trim();
     if (!name) return;
 
+    // Bloqueio: pelo menos uma coluna deve estar marcada
+    const selectedColsArr = Array.from(document.querySelectorAll('input[name="shortcut-col"]:checked'));
+    if (selectedColsArr.length === 0) {
+      notify("É necessário selecionar pelo menos uma coluna.", true);
+      return;
+    }
+
     const cats = Array.from(state.shortcutSelectedCategories).join(", ");
-    const onlyProj = byId("shortcut-projects-select").value;
-    const dupCats = byId("shortcut-duplicate-select").value;
     const active = byId("shortcut-active-switch").checked;
+
+    // Ler checkboxes de Apenas Projetos
+    const projTrue = byId("shortcut-projects-true").checked;
+    const projFalse = byId("shortcut-projects-false").checked;
+    let onlyProj = "";
+    if (projTrue && !projFalse) onlyProj = "TRUE";
+    else if (!projTrue && projFalse) onlyProj = "FALSE";
+    // Se ambas marcadas → vazio (opção 2)
+
+    // Ler checkbox de Categorias Duplicadas
+    const dupCats = byId("shortcut-duplicate-checkbox").checked ? "TRUE" : "FALSE";
 
     const selectedStatus = Array.from(document.querySelectorAll('input[name="shortcut-status"]:checked'))
       .map((cb) => cb.value)
       .join(", ");
 
-    const selectedCols = Array.from(document.querySelectorAll('input[name="shortcut-col"]:checked'))
+    const selectedCols = selectedColsArr
       .map((cb) => cb.value)
       .join(", ");
 
@@ -1845,7 +1886,18 @@
     byId("add-task").addEventListener("click", () => dialogOpen(byId("task-dialog")));
     byId("search-input").addEventListener("input", renderTable);
     document.querySelectorAll('input[name="status-filter"]').forEach((input) => input.addEventListener("change", renderTable));
-    byId("projects-only").addEventListener("change", renderTable);
+    const projTrueCb = byId("filter-projects-true");
+    const projFalseCb = byId("filter-projects-false");
+    const handleProjectFilterChange = (changedCb) => {
+      if (!projTrueCb.checked && !projFalseCb.checked) {
+        changedCb.checked = true;
+        notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
+        return;
+      }
+      renderTable();
+    };
+    projTrueCb.addEventListener("change", () => handleProjectFilterChange(projTrueCb));
+    projFalseCb.addEventListener("change", () => handleProjectFilterChange(projFalseCb));
     byId("group-categories").addEventListener("change", () => {
       state.expanded.clear();
       renderTable();
@@ -1948,6 +2000,28 @@
     byId("delete-shortcut-btn").addEventListener("click", deleteShortcut);
     setupShortcutCategoryDropdown();
 
+    // Bloqueio de checkboxes de Projetos na modal de atalho (não permitir ambas desmarcadas)
+    const scProjTrue = byId("shortcut-projects-true");
+    const scProjFalse = byId("shortcut-projects-false");
+    const handleShortcutProjectChange = (changedCb) => {
+      if (!scProjTrue.checked && !scProjFalse.checked) {
+        changedCb.checked = true;
+        notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
+      }
+    };
+    scProjTrue.addEventListener("change", () => handleShortcutProjectChange(scProjTrue));
+    scProjFalse.addEventListener("change", () => handleShortcutProjectChange(scProjFalse));
+
+    // Bloqueio de checkboxes de colunas na modal de atalho (não permitir todas desmarcadas)
+    byId("shortcut-columns-checks").addEventListener("change", (e) => {
+      if (e.target.name !== "shortcut-col") return;
+      const checked = document.querySelectorAll('input[name="shortcut-col"]:checked');
+      if (checked.length === 0) {
+        e.target.checked = true;
+        notify("É necessário selecionar pelo menos uma coluna.", true);
+      }
+    });
+
     // Context Menu Items
     byId("context-select-row").addEventListener("click", () => {
       if (activeContextRecord) {
@@ -2035,13 +2109,15 @@
       }
     });
 
-    // Fechar seletor "Colunas" ao clicar fora
+    // Fechar seletor "Colunas" e "Projetos" ao clicar fora
     const colPickerDetails = byId("column-picker-details");
+    const projPickerDetails = byId("projects-picker-details");
     document.addEventListener("click", (e) => {
-      if (colPickerDetails && colPickerDetails.open) {
-        if (!colPickerDetails.contains(e.target)) {
-          colPickerDetails.open = false;
-        }
+      if (colPickerDetails && colPickerDetails.open && !colPickerDetails.contains(e.target)) {
+        colPickerDetails.open = false;
+      }
+      if (projPickerDetails && projPickerDetails.open && !projPickerDetails.contains(e.target)) {
+        projPickerDetails.open = false;
       }
     });
 

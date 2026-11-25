@@ -327,6 +327,7 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .column-picker summary::-webkit-details-marker { display: none; }
 .column-picker summary span { margin-left: 5px; color: var(--muted); }
 .column-options { position: absolute; top: 27px; right: 0; display: grid; min-width: 185px; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-popover); }
+#projects-options { left: 0; right: auto; min-width: 155px; }
 
 /* Table Section & Toolbar */
 .table-card { margin-top: 17px; overflow: hidden; }
@@ -358,7 +359,8 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
   border-radius: 0 0 12px 12px;
 }
 table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
