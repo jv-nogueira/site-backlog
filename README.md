@@ -17,6 +17,7 @@ site-backlog/
 
 ## 1. Preparar a planilha
 
+### Aba `Database`
 Crie ou confirme uma aba chamada **Database**. A linha 1 deve conter estes nomes exatos (em qualquer ordem):
 
 ```text
@@ -25,18 +26,38 @@ Categoria | Descrição | Projeto | Status | Observação | Data conclusão | Re
 
 `Projeto` deve ser uma caixa de seleção (ou valor booleano). Um status vazio é apresentado como **Aberto**. Linhas sem Categoria e sem Descrição são ignoradas.
 
+### Aba `Atalhos` (Opcional - Criada automaticamente pelo backend)
+Se desejar pré-configurar atalhos diretamente na planilha, crie uma aba chamada **Atalhos** com os cabeçalhos:
+
+```text
+Nome-Button | Categorias-Filtradas | Apenas-Projetos | Status-Selecionados | Categorias-Duplicadas | Colunas | Ativar-Atalho
+```
+- `Nome-Button`: Nome do botão do atalho (ex.: *Backlog*, *Projetos*, *Marketing*).
+- `Categorias-Filtradas`: Lista de categorias separadas por vírgula (ou vazio para todas).
+- `Apenas-Projetos`: `TRUE`, `FALSE` (oculta projetos) ou vazio (padrão do site).
+- `Status-Selecionados`: Status separados por vírgula (ex.: `Aberto` ou `Aberto, Resolvido`).
+- `Categorias-Duplicadas`: `TRUE` para ativar agrupamento "Não mostrar Categoria duplicadas" ou vazio.
+- `Colunas`: Colunas visíveis separadas por vírgula (ou vazio para o padrão).
+- `Ativar-Atalho`: `TRUE` para exibir na barra principal ou `FALSE` para colocar na lista recolhida de atalhos inativos.
+
+Caso a aba **Atalhos** ainda não exista na planilha, o backend criará a aba automaticamente com os cabeçalhos na primeira operação de salvamento.
+
+---
+
 ## 2. Publicar o backend Apps Script
 
 1. Abra a planilha e escolha **Extensões → Apps Script**.
 2. Copie o conteúdo de [`backend/Code.gs`](backend/Code.gs) para o editor Apps Script (o arquivo pode ser chamado `Code.gs`).
 3. Salve o projeto. Como ele foi criado a partir da planilha, `getActiveSpreadsheet()` aponta para esse Workspace.
-4. Escolha **Implantar → Nova implantação → App da Web**.
-5. Selecione **Executar como: eu** e escolha quem pode acessar o Web App. Confirme a implantação e autorize o acesso solicitado.
+4. Escolha **Implantar → Gerenciar implantações**.
+   - Se for a primeira vez: **Nova implantação → App da Web**.
+   - Se estiver atualizando uma implantação existente: Clique no ícone de lápis (**Editar**), selecione **Versão: Nova versão**, e clique em **Implantar**. **Importante:** Sempre que o arquivo `Code.gs` for alterado, é obrigatório gerar uma **Nova versão** para que o Google Apps Script atualize o código em produção na URL `/exec`.
+5. Selecione **Executar como: eu** e escolha quem pode acessar o Web App (ex.: *Qualquer pessoa*). Confirme a implantação e autorize o acesso solicitado.
 6. Copie a URL de implantação terminada em `/exec`.
 
 O Apps Script não permite configurar livremente cabeçalhos CORS para uma resposta de `ContentService`. Por isso, a leitura usa JSONP e as gravações usam um formulário direcionado a um iframe oculto, que recebe uma confirmação via `postMessage`. A aplicação valida a origem da resposta do iframe/Apps Script e um nonce de requisição.
 
-**Atenção ao acesso:** um Web App publicado para acesso amplo pode permitir que qualquer pessoa que conheça sua URL consulte e altere a planilha, executando com as permissões do proprietário. Restrinja o acesso na implantação a usuários da sua organização/conta sempre que possível. O frontend não é uma camada de autenticação.
+---
 
 ## 3. Publicar o frontend no GitHub Pages
 
@@ -48,15 +69,19 @@ O Apps Script não permite configurar livremente cabeçalhos CORS para uma respo
 
 Não é necessária etapa de build. Para testar localmente, sirva a raiz com qualquer servidor HTTP estático. A integração não deve ser testada abrindo o HTML com `file://`.
 
-## Recursos
+---
 
-- Tabela dinâmica baseada nos nomes exatos dos oito cabeçalhos, independente da posição das colunas.
-- Colunas visíveis inicialmente: Categoria, Descrição, Recebedor e Preço total. A seleção de colunas também é lembrada no navegador.
-- Filtros de status, somente projetos, busca e agrupamento expansível de Categorias duplicadas.
-- Criação, edição em linha, propagação de mudança de Categoria para as tarefas que compartilhavam o nome anterior e atualização de Data conclusão ao mudar Status.
-- **Salvar alterações** aplica uma única transação lógica; **Cancelar** descarta as edições locais. O backend usa lock e valida a versão das linhas antes de gravar, recusando alterações conflitantes.
-- Novas tarefas são inseridas a partir da linha 2, logo abaixo dos cabeçalhos. Uma criação como Resolvido recebe data de conclusão automaticamente.
+## Recursos e Funcionalidades
 
-## Implantação após alterações
-
-Depois de editar o Apps Script, crie uma nova versão da implantação em **Implantar → Gerenciar implantações → Editar → Nova versão**. A URL `/exec` normalmente permanece a mesma.
+- **Coluna congelada e cabeçalho fixo (Sticky):** A primeira coluna e o cabeçalho `thead` permanecem fixos durante a rolagem horizontal e vertical, com fundo opaco em ambos os modos (claro e escuro).
+- **Redimensionamento de colunas:** Ajuste a largura de qualquer coluna arrastando a borda direita do seu cabeçalho (suporta mouse e touch).
+- **Conteúdo rígido nas células:** Células sem scroll interno indesejado, permitindo rolagem fluida e sem travar o toque em dispositivos móveis.
+- **Atalhos Rápidos Configuráveis:** Barra superior de atalhos rápidos integrada com a aba `Atalhos` da planilha. Permite criar, editar, ativar/desativar e excluir atalhos. As mudanças são aplicadas no frontend e salvas na planilha via "Salvar alterações".
+- **Contador inteligente de alterações:** Os botões *Salvar alterações* e *Cancelar* contabilizam linhas únicas da Database modificadas/criadas + 1 unidade por atalho criado/editado/ativado/excluído.
+- **Modal de alteração de Categoria:** Ao editar a categoria de uma linha que compartilha a mesma categoria com outras, é exibida a opção de alterar apenas naquela linha ou em todas as linhas correspondentes (atualizando inclusive atalhos vinculados).
+- **Confirmação ao Salvar:** Modal de confirmação inteligente caso haja mais de 1 linha modificada antes de enviar para a planilha.
+- **Menu de contexto (Desktop e Mobile):** Clique com botão direito ou mantenha pressionado (long press no mobile) em uma linha para abrir o menu com as opções:
+  - *Selecionar*: Ativa a seleção múltipla de linhas, com barra flutuante para copiar dados tabulados com cabeçalhos para o clipboard ou limpar seleção.
+  - *Duplicar linha*: Clona a linha como uma nova entrada pendente pronta para edição.
+- **Autocompletar de Categoria:** Sugestões dinâmicas de categorias existentes no modal "Adicionar tarefa", sem preenchimento involuntário.
+- **Filtros avançados e Ordenação:** Filtros por coluna estilo planilha (Google Sheets), busca em tempo real, status e agrupamento de duplicadas.

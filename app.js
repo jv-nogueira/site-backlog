@@ -13,32 +13,55 @@
   ];
   const DEFAULT_COLUMNS = new Set(["Categoria", "Descrição", "Recebedor", "Preço total"]);
   const STATUSES = ["Aberto", "Resolvido", "Cancelado"];
-  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwBEPZ4VDLjlu5YYm_DZ18_wa3UDWSUpKgkmW-Skv-95_uw4TrXOnzIAgCB6yw1ACmb/exec";
+  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbymxIFcm3YZjMZuMN4W7lA2oKMwfVMsR4XsZIjGS3GLUBESg9kS0EfwWbgwL3leYTVp/exec";
   const COLUMN_KEY = "workspace-database-visible-columns";
   const THEME_KEY = "workspace-database-theme";
   const BLANK_VALUE_KEY = "__BLANK_VALUE__";
 
   const state = {
+    // Database records
     records: [],
-    pending: new Map(),
-    creates: new Set(),
+    pending: new Map(), // recordId -> { field: newValue }
+    creates: new Set(), // Set(recordId)
     visibleColumns: new Set(DEFAULT_COLUMNS),
     expanded: new Set(),
     pendingStatus: null,
     busy: false,
     theme: "light",
+    loaded: false,
+
+    // Column Filters & Sorting
     columnFilters: new Map(), // field -> Set(allowedValues)
     activeFilterField: null,
     sortField: null,
     sortDirection: null, // "asc" | "desc"
-    filterSearchTerm: ""
+    filterSearchTerm: "",
+
+    // Multi-selection
+    selectionMode: false,
+    selectedRowIds: new Set(),
+
+    // Pending Category Conflict
+    categoryConflict: null, // { record, oldVal, newVal }
+
+    // Column resizing
+    columnWidths: {}, // field -> px
+
+    // Shortcuts
+    shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
+    shortcutDeletes: new Set(), // Set of rowNumbers to delete from sheet
+    activeEditingShortcut: null, // shortcut object currently being edited
+    shortcutSelectedCategories: new Set()
   };
 
   const byId = (id) => document.getElementById(id);
   const tableHead = byId("table-head");
   const tableBody = byId("table-body");
   const columnFilterMenu = byId("column-filter-menu");
+  const rowContextMenu = byId("row-context-menu");
   let toastTimer;
+  let activeContextRecord = null;
+  let longPressTimeout = null;
 
   function makeId() {
     return "new-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
@@ -142,12 +165,6 @@
   /* -------------------------------------------------------------
      FILTROS E ORDENAÇÃO
      ------------------------------------------------------------- */
-  function getNormalizedFieldValue(val, field) {
-    if (field === "Projeto") return Boolean(val);
-    if (val == null) return "";
-    return String(val).trim();
-  }
-
   function getUniqueFieldValues(field) {
     const values = new Set();
     state.records.forEach((record) => {
@@ -243,6 +260,50 @@
   }
 
   /* -------------------------------------------------------------
+     REDIMENSIONAMENTO DE COLUNA PELO CABEÇALHO
+     ------------------------------------------------------------- */
+  function setupColumnResize(th, field) {
+    const resizer = createElement("div", "col-resizer");
+    resizer.setAttribute("title", "Arraste para redimensionar coluna");
+    th.appendChild(resizer);
+
+    let startX = 0;
+    let startWidth = 0;
+
+    function onPointerMove(e) {
+      const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const diff = clientX - startX;
+      const newWidth = Math.max(50, startWidth + diff);
+      th.style.width = newWidth + "px";
+      th.style.minWidth = newWidth + "px";
+      state.columnWidths[field] = newWidth;
+    }
+
+    function onPointerUp() {
+      resizer.classList.remove("is-resizing");
+      document.removeEventListener("mousemove", onPointerMove);
+      document.removeEventListener("mouseup", onPointerUp);
+      document.removeEventListener("touchmove", onPointerMove);
+      document.removeEventListener("touchend", onPointerUp);
+    }
+
+    function onPointerDown(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      resizer.classList.add("is-resizing");
+      startX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      startWidth = th.offsetWidth;
+      document.addEventListener("mousemove", onPointerMove);
+      document.addEventListener("mouseup", onPointerUp);
+      document.addEventListener("touchmove", onPointerMove, { passive: false });
+      document.addEventListener("touchend", onPointerUp);
+    }
+
+    resizer.addEventListener("mousedown", onPointerDown);
+    resizer.addEventListener("touchstart", onPointerDown, { passive: false });
+  }
+
+  /* -------------------------------------------------------------
      RENDERIZAÇÃO DAS CÉLULAS E TABELA
      ------------------------------------------------------------- */
   function isCellPending(record, field) {
@@ -251,9 +312,10 @@
     return Boolean(pendingChanges && field in pendingChanges);
   }
 
-  function makeCellEditor(record, field, subtask) {
+  function makeCellEditor(record, field, subtask, isFirstCol) {
     const cell = document.createElement("td");
-    if (field === "Projeto") cell.className = "project-cell";
+    if (isFirstCol) cell.classList.add("is-first-col");
+    if (field === "Projeto") cell.className = (cell.className + " project-cell").trim();
     if (isCellPending(record, field)) {
       cell.classList.add("is-pending-cell");
       cell.title = "Alteração pendente não salva";
@@ -276,7 +338,6 @@
       textarea.className = "desc-textarea";
       textarea.value = escapeText(currentFields(record).Descrição);
       textarea.setAttribute("aria-label", "Descrição");
-      textarea.setAttribute("title", "Arraste o canto inferior direito para redimensionar/expandir");
       textarea.addEventListener("change", () => stageField(record, field, textarea.value));
       wrap.appendChild(textarea);
       cell.appendChild(wrap);
@@ -371,8 +432,15 @@
 
   function renderTableHead(columns) {
     tableHead.replaceChildren();
-    columns.forEach((field) => {
+    columns.forEach((field, index) => {
       const th = document.createElement("th");
+      if (index === 0) th.classList.add("is-first-col");
+
+      if (state.columnWidths[field]) {
+        th.style.width = state.columnWidths[field] + "px";
+        th.style.minWidth = state.columnWidths[field] + "px";
+      }
+
       const content = createElement("div", "th-content");
       const label = createElement("span", "th-label", field);
       content.appendChild(label);
@@ -397,9 +465,14 @@
 
       content.appendChild(filterBtn);
       th.appendChild(content);
+
+      // Setup drag resizer
+      setupColumnResize(th, field);
+
       tableHead.appendChild(th);
     });
-    tableHead.appendChild(createElement("th", "actions-heading", " "));
+    const actionTh = createElement("th", "actions-heading", " ");
+    tableHead.appendChild(actionTh);
   }
 
   function renderTable() {
@@ -428,22 +501,63 @@
       }
     });
 
-    byId("result-count").textContent = visibleCount + (visibleCount === 1 ? " tarefa" : " tarefas");
-    byId("empty-state").hidden = visibleCount > 0;
+    if (!state.loaded) {
+      byId("result-count").textContent = "Carregando tarefas...";
+      byId("empty-state").hidden = true;
+    } else {
+      byId("result-count").textContent = visibleCount + (visibleCount === 1 ? " tarefa" : " tarefas");
+      byId("empty-state").hidden = visibleCount > 0;
+    }
+
     updateResultSummary(flatVisibleRecords);
     updatePendingControls();
     updateClearColumnFiltersBtn();
+    updateSelectionBar();
   }
 
   function appendRecordRow(record, columns, subtask, duplicateGroup, hiddenCount) {
     const tr = document.createElement("tr");
+    tr.dataset.recordId = record.id;
     if (subtask) tr.classList.add("subtask-row");
     if (state.creates.has(record.id) || state.pending.has(record.id)) tr.classList.add("pending-row");
     if (state.creates.has(record.id)) tr.classList.add("is-new-row");
+    if (state.selectedRowIds.has(record.id)) tr.classList.add("selected-row");
 
-    columns.forEach((field) => {
+    // Click in selection mode toggles selection
+    tr.addEventListener("click", (e) => {
+      if (state.selectionMode && !e.target.closest("button") && !e.target.closest("select")) {
+        toggleRowSelection(record.id);
+      }
+    });
+
+    // Context menu desktop & touch long press
+    tr.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      openContextMenu(e.clientX, e.clientY, record);
+    });
+
+    tr.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        longPressTimeout = setTimeout(() => {
+          openContextMenu(touch.clientX, touch.clientY, record);
+        }, 550);
+      }
+    }, { passive: true });
+
+    tr.addEventListener("touchmove", () => {
+      if (longPressTimeout) clearTimeout(longPressTimeout);
+    }, { passive: true });
+
+    tr.addEventListener("touchend", () => {
+      if (longPressTimeout) clearTimeout(longPressTimeout);
+    });
+
+    columns.forEach((field, colIndex) => {
+      const isFirstCol = (colIndex === 0);
       if (field === "Categoria" && duplicateGroup) {
         const cell = document.createElement("td");
+        if (isFirstCol) cell.classList.add("is-first-col");
         if (isCellPending(record, field)) {
           cell.classList.add("is-pending-cell");
           cell.title = "Alteração pendente não salva";
@@ -462,9 +576,10 @@
         cell.appendChild(wrap);
         tr.appendChild(cell);
       } else {
-        tr.appendChild(makeCellEditor(record, field, subtask));
+        tr.appendChild(makeCellEditor(record, field, subtask, isFirstCol));
       }
     });
+
     const action = document.createElement("td");
     action.setAttribute("aria-hidden", "true");
     tr.appendChild(action);
@@ -472,7 +587,97 @@
   }
 
   /* -------------------------------------------------------------
-     4. MENU DE FILTRO POR COLUNA (GOOGLE SHEETS STYLE)
+     MENU DE CONTEXTO E MODO SELEÇÃO
+     ------------------------------------------------------------- */
+  function openContextMenu(x, y, record) {
+    activeContextRecord = record;
+    rowContextMenu.hidden = false;
+
+    // Boundary check
+    const menuWidth = 170;
+    const menuHeight = 90;
+    let posX = x;
+    let posY = y;
+    if (posX + menuWidth > window.innerWidth) posX = window.innerWidth - menuWidth - 10;
+    if (posY + menuHeight > window.innerHeight) posY = window.innerHeight - menuHeight - 10;
+    if (posX < 10) posX = 10;
+    if (posY < 10) posY = 10;
+
+    rowContextMenu.style.left = posX + "px";
+    rowContextMenu.style.top = posY + "px";
+  }
+
+  function closeContextMenu() {
+    rowContextMenu.hidden = true;
+    activeContextRecord = null;
+  }
+
+  function toggleRowSelection(recordId) {
+    if (state.selectedRowIds.has(recordId)) {
+      state.selectedRowIds.delete(recordId);
+    } else {
+      state.selectedRowIds.add(recordId);
+    }
+    if (state.selectedRowIds.size === 0) {
+      state.selectionMode = false;
+    }
+    renderTable();
+  }
+
+  function updateSelectionBar() {
+    const bar = byId("selection-bar");
+    const countEl = byId("selection-count");
+    if (state.selectedRowIds.size > 0) {
+      bar.hidden = false;
+      countEl.textContent = state.selectedRowIds.size;
+    } else {
+      bar.hidden = true;
+    }
+  }
+
+  function copySelectedRows() {
+    if (state.selectedRowIds.size === 0) return;
+    const columns = FIELDS.filter((f) => state.visibleColumns.has(f));
+    const lines = [];
+    // Cabeçalho
+    lines.push(columns.join("\t"));
+
+    state.records.forEach((record) => {
+      if (state.selectedRowIds.has(record.id)) {
+        const fields = currentFields(record);
+        const rowData = columns.map((col) => {
+          if (col === "Projeto") return fields[col] ? "Sim" : "Não";
+          return escapeText(fields[col]);
+        });
+        lines.push(rowData.join("\t"));
+      }
+    });
+
+    const textToCopy = lines.join("\n");
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      notify(`Copiado! ${state.selectedRowIds.size} linha(s) com cabeçalhos.`);
+    }).catch(() => {
+      notify("Erro ao copiar para a área de transferência.", true);
+    });
+  }
+
+  function clearSelection() {
+    state.selectionMode = false;
+    state.selectedRowIds.clear();
+    renderTable();
+  }
+
+  function duplicateRecord(record) {
+    const orig = currentFields(record);
+    const newFields = Object.assign({}, orig);
+    // Cria nova linha pendente
+    createRecord(newFields);
+    renderTable();
+    notify("Linha duplicada como pendente. Salve para gravar.");
+  }
+
+  /* -------------------------------------------------------------
+     MENU DE FILTRO POR COLUNA (GOOGLE SHEETS STYLE)
      ------------------------------------------------------------- */
   let tempSelectedValues = new Set();
 
@@ -491,7 +696,6 @@
 
     renderColumnFilterValuesList(allValues);
 
-    // Posicionar popover
     const rect = buttonEl.getBoundingClientRect();
     columnFilterMenu.hidden = false;
     columnFilterMenu.style.position = "fixed";
@@ -555,15 +759,26 @@
      ------------------------------------------------------------- */
   function stageField(record, field, value) {
     if (field === "Categoria") {
-      const oldCategory = String(currentFields(record).Categoria || "");
-      state.records.forEach((candidate) => {
-        if (String(currentFields(candidate).Categoria || "") === oldCategory) {
-          setPendingValue(candidate, field, value);
-        }
-      });
-    } else {
-      setPendingValue(record, field, value);
+      const oldCat = String(currentFields(record).Categoria || "").trim();
+      const newCat = String(value || "").trim();
+      if (oldCat === newCat) return;
+
+      // Verifica se outras linhas compartilham a mesma categoria antiga
+      const matchingCount = state.records.filter((r) => {
+        return r.id !== record.id && String(currentFields(r).Categoria || "").trim() === oldCat;
+      }).length;
+
+      if (matchingCount > 0 && oldCat !== "") {
+        // Abre modal para confirmar se aplica nesta linha ou em todas
+        state.categoryConflict = { record, oldVal: oldCat, newVal: newCat };
+        byId("category-conflict-desc").textContent =
+          `Existem ${matchingCount} outra(s) tarefa(s) na categoria "${oldCat}". Deseja aplicar a mudança para "${newCat}" apenas nesta linha ou em todas as linhas dessa categoria?`;
+        dialogOpen(byId("category-conflict-dialog"));
+        return;
+      }
     }
+
+    setPendingValue(record, field, value);
     renderTable();
   }
 
@@ -610,16 +825,27 @@
     return record;
   }
 
-  function hasPendingChanges() {
-    return state.pending.size > 0 || state.creates.size > 0;
+  /* -------------------------------------------------------------
+     CONTAGEM DE ALTERAÇÕES (Database + Atalhos)
+     ------------------------------------------------------------- */
+  function countPendingChanges() {
+    // Quantidade de linhas únicas afetadas na Database
+    const affectedDbRows = new Set();
+    state.creates.forEach((id) => affectedDbRows.add(id));
+    state.pending.forEach((_, id) => affectedDbRows.add(id));
+    let total = affectedDbRows.size;
+
+    // + 1 por atalho criado, editado, ligado/desligado ou excluído
+    state.shortcuts.forEach((sc) => {
+      if (sc.isNew || sc.isModified) total += 1;
+    });
+    total += state.shortcutDeletes.size;
+
+    return total;
   }
 
-  function countPendingChanges() {
-    let count = state.creates.size;
-    state.pending.forEach((changes) => {
-      count += Object.keys(changes).length;
-    });
-    return count;
+  function hasPendingChanges() {
+    return countPendingChanges() > 0;
   }
 
   function updatePendingControls() {
@@ -650,12 +876,40 @@
     state.pending.clear();
     state.creates.clear();
     state.expanded.clear();
+    state.shortcutDeletes.clear();
+    // Reverter atalhos para os dados originais recebidos
+    state.shortcuts = state.shortcuts
+      .filter((s) => !s.isNew)
+      .map((s) => ({
+        id: s.id,
+        rowNumber: s.rowNumber,
+        fields: Object.assign({}, s.originalFields || s.fields),
+        originalFields: Object.assign({}, s.originalFields || s.fields),
+        isNew: false,
+        isModified: false
+      }));
+
+    renderShortcutsBar();
     renderTable();
     notify("Alterações descartadas.");
   }
 
-  function saveChanges() {
+  function checkAndConfirmSave() {
     if (state.busy || !hasPendingChanges()) return;
+
+    // Linhas afetadas na Database
+    const affectedDbRowsCount = state.creates.size + state.pending.size;
+    if (affectedDbRowsCount > 1) {
+      byId("save-confirm-message").textContent =
+        `Existem ${affectedDbRowsCount} linhas na Database com alterações ou novas entradas para serem salvas na planilha. Deseja confirmar?`;
+      dialogOpen(byId("save-confirm-dialog"));
+      return;
+    }
+
+    executeSave();
+  }
+
+  function executeSave() {
     const updates = [];
     state.records.forEach((record) => {
       if (state.creates.has(record.id)) return;
@@ -672,13 +926,40 @@
       .filter((record) => state.creates.has(record.id))
       .map((record) => record.fields);
 
+    // Shortcut payload
+    const shortcutUpdates = [];
+    const shortcutCreates = [];
+    state.shortcuts.forEach((sc) => {
+      if (sc.isNew) {
+        shortcutCreates.push({ fields: sc.fields });
+      } else if (sc.isModified) {
+        shortcutUpdates.push({ rowNumber: sc.rowNumber, fields: sc.fields });
+      }
+    });
+    const shortcutDeletes = Array.from(state.shortcutDeletes);
+
+    const shortcutsPayload = {
+      updates: shortcutUpdates,
+      creates: shortcutCreates,
+      deletes: shortcutDeletes
+    };
+
     state.busy = true;
     updatePendingControls();
-    postRequest(BACKEND_URL, { action: "save", updates, newRecords })
+
+    postRequest(BACKEND_URL, {
+      action: "save",
+      updates,
+      newRecords,
+      shortcuts: shortcutsPayload
+    })
       .then((response) => {
-        if (!response || !response.ok) throw new Error(response && response.error ? response.error : "O backend não confirmou a gravação.");
+        if (!response || !response.ok) {
+          throw new Error(response && response.error ? response.error : "O backend não confirmou a gravação.");
+        }
         state.pending.clear();
         state.creates.clear();
+        state.shortcutDeletes.clear();
         return loadRecords();
       })
       .then(() => notify("Alterações salvas na planilha."))
@@ -742,12 +1023,32 @@
         }));
         state.pending.clear();
         state.creates.clear();
+        state.loaded = true;
+
+        // Process shortcuts
+        if (Array.isArray(response.shortcuts)) {
+          state.shortcuts = response.shortcuts.map((sc) => ({
+            id: makeId(),
+            rowNumber: sc.rowNumber,
+            fields: Object.assign({}, sc.fields),
+            originalFields: Object.assign({}, sc.fields),
+            isNew: false,
+            isModified: false
+          }));
+        } else {
+          state.shortcuts = [];
+        }
+        state.shortcutDeletes.clear();
+
+        renderShortcutsBar();
         renderTable();
         setConnectionStatus(true, "Conectado à planilha");
       })
       .catch((error) => {
+        state.loaded = true;
         setConnectionStatus(false, "Falha na conexão");
         notify("Não foi possível carregar a Database: " + error.message, true);
+        renderTable();
         throw error;
       });
   }
@@ -781,9 +1082,394 @@
     });
   }
 
+  /* -------------------------------------------------------------
+     AUTOCOMPLETAR DE CATEGORIA NO MODAL "ADICIONAR TAREFA"
+     ------------------------------------------------------------- */
+  function setupCategoryAutocomplete() {
+    const input = byId("task-category-input");
+    const dropdown = byId("task-category-suggestions");
+
+    function getExistingCategories() {
+      const set = new Set();
+      state.records.forEach((r) => {
+        const cat = String(currentFields(r).Categoria || "").trim();
+        if (cat) set.add(cat);
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    }
+
+    function renderSuggestions(query) {
+      const all = getExistingCategories();
+      const q = String(query || "").trim().toLocaleLowerCase("pt-BR");
+      const matches = all.filter((cat) => !q || cat.toLocaleLowerCase("pt-BR").includes(q));
+
+      dropdown.replaceChildren();
+      if (matches.length === 0) {
+        dropdown.hidden = true;
+        return;
+      }
+
+      matches.forEach((cat) => {
+        const item = createElement("div", "autocomplete-item", cat);
+        item.addEventListener("click", () => {
+          input.value = cat;
+          dropdown.hidden = true;
+        });
+        dropdown.appendChild(item);
+      });
+      dropdown.hidden = false;
+    }
+
+    input.addEventListener("focus", () => {
+      renderSuggestions(input.value);
+    });
+
+    input.addEventListener("input", () => {
+      renderSuggestions(input.value);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.hidden = true;
+      }
+    });
+  }
+
+  /* -------------------------------------------------------------
+     ATALHOS RÁPIDOS (CRUD + RENDERIZAÇÃO + APLICAÇÃO)
+     ------------------------------------------------------------- */
+  function renderShortcutsBar() {
+    const container = byId("shortcuts-container");
+    const inactiveContainer = byId("inactive-shortcuts-list");
+    const inactiveDetails = byId("inactive-shortcuts-details");
+    const inactiveCountEl = byId("inactive-shortcuts-count");
+
+    container.replaceChildren();
+    inactiveContainer.replaceChildren();
+
+    const activeShortcuts = state.shortcuts.filter((sc) => sc.fields["Ativar-Atalho"] === true);
+    const inactiveShortcuts = state.shortcuts.filter((sc) => sc.fields["Ativar-Atalho"] !== true);
+
+    activeShortcuts.forEach((sc) => {
+      const group = createElement("div", "shortcut-pill-group");
+      if (sc.isNew || sc.isModified) group.classList.add("is-pending-shortcut");
+
+      const applyBtn = createElement("button", "shortcut-apply-btn", sc.fields["Nome-Button"]);
+      applyBtn.type = "button";
+      applyBtn.title = "Aplicar filtros deste atalho";
+      applyBtn.addEventListener("click", () => applyShortcut(sc));
+
+      const editBtn = createElement("button", "shortcut-edit-btn", "✎");
+      editBtn.type = "button";
+      editBtn.title = "Editar atalho";
+      editBtn.addEventListener("click", () => openShortcutForm(sc));
+
+      group.append(applyBtn, editBtn);
+      container.appendChild(group);
+    });
+
+    inactiveCountEl.textContent = inactiveShortcuts.length;
+    if (inactiveShortcuts.length > 0) {
+      inactiveDetails.hidden = false;
+      inactiveShortcuts.forEach((sc) => {
+        const item = createElement("div", "inactive-shortcut-item");
+        const titleSpan = createElement("span", "", sc.fields["Nome-Button"]);
+        const editSpan = createElement("span", "", "✎ Editar");
+        item.append(titleSpan, editSpan);
+        item.addEventListener("click", () => {
+          inactiveDetails.open = false;
+          openShortcutForm(sc);
+        });
+        inactiveContainer.appendChild(item);
+      });
+    } else {
+      inactiveDetails.hidden = true;
+      inactiveDetails.open = false;
+    }
+  }
+
+  function applyShortcut(shortcut) {
+    const f = shortcut.fields;
+
+    // 1. Categorias filtradas
+    const rawCats = String(f["Categorias-Filtradas"] || "").trim();
+    if (rawCats) {
+      const allowedCats = new Set(rawCats.split(",").map((s) => s.trim()).filter(Boolean));
+      state.columnFilters.set("Categoria", allowedCats);
+    } else {
+      state.columnFilters.delete("Categoria");
+    }
+
+    // 2. Apenas projetos
+    const proj = String(f["Apenas-Projetos"] || "").trim().toUpperCase();
+    if (proj === "TRUE" || proj === "VERDADEIRO") {
+      byId("projects-only").checked = true;
+    } else {
+      byId("projects-only").checked = false;
+    }
+
+    // 3. Status selecionados
+    const rawStatus = String(f["Status-Selecionados"] || "").trim();
+    const statusInputs = document.querySelectorAll('input[name="status-filter"]');
+    if (rawStatus) {
+      const selectedStatuses = new Set(rawStatus.split(",").map((s) => s.trim().toLocaleLowerCase("pt-BR")));
+      statusInputs.forEach((input) => {
+        input.checked = selectedStatuses.has(input.value.toLocaleLowerCase("pt-BR"));
+      });
+    } else {
+      // Padrão do site: Aberto marcado
+      statusInputs.forEach((input) => {
+        input.checked = (input.value === "Aberto");
+      });
+    }
+
+    // 4. Categorias duplicadas
+    const rawDup = String(f["Categorias-Duplicadas"] || "").trim().toUpperCase();
+    if (rawDup === "TRUE" || rawDup === "VERDADEIRO") {
+      byId("group-categories").checked = true;
+    } else if (rawDup === "FALSE" || rawDup === "FALSO") {
+      byId("group-categories").checked = false;
+    }
+
+    // 5. Colunas
+    const rawCols = String(f["Colunas"] || "").trim();
+    if (rawCols) {
+      const cols = rawCols.split(",").map((s) => s.trim()).filter((col) => FIELDS.includes(col));
+      if (cols.length > 0) {
+        state.visibleColumns = new Set(cols);
+        localStorage.setItem(COLUMN_KEY, JSON.stringify(cols));
+        renderColumnOptions();
+      }
+    } else {
+      state.visibleColumns = new Set(DEFAULT_COLUMNS);
+      localStorage.setItem(COLUMN_KEY, JSON.stringify(Array.from(DEFAULT_COLUMNS)));
+      renderColumnOptions();
+    }
+
+    state.expanded.clear();
+    renderTable();
+    notify(`Atalho "${f["Nome-Button"]}" aplicado.`);
+  }
+
+  function openShortcutForm(shortcut) {
+    state.activeEditingShortcut = shortcut;
+    const isEditing = Boolean(shortcut);
+
+    byId("shortcut-dialog-eyebrow").textContent = isEditing ? "EDITAR ATALHO" : "NOVO ATALHO";
+    byId("shortcut-dialog-title").textContent = isEditing ? "Editar atalho" : "Criar atalho";
+    byId("delete-shortcut-btn").hidden = !isEditing;
+
+    const fields = shortcut ? shortcut.fields : {
+      "Nome-Button": "",
+      "Categorias-Filtradas": "",
+      "Apenas-Projetos": "",
+      "Status-Selecionados": "",
+      "Categorias-Duplicadas": "",
+      "Colunas": "",
+      "Ativar-Atalho": true
+    };
+
+    byId("shortcut-name-input").value = fields["Nome-Button"] || "";
+    byId("shortcut-projects-select").value = fields["Apenas-Projetos"] || "";
+    byId("shortcut-duplicate-select").value = fields["Categorias-Duplicadas"] || "";
+    byId("shortcut-active-switch").checked = (fields["Ativar-Atalho"] !== false);
+
+    // Status checks
+    const statusSet = new Set(
+      String(fields["Status-Selecionados"] || "")
+        .split(",")
+        .map((s) => s.trim().toLocaleLowerCase("pt-BR"))
+        .filter(Boolean)
+    );
+    document.querySelectorAll('input[name="shortcut-status"]').forEach((cb) => {
+      cb.checked = statusSet.has(cb.value.toLocaleLowerCase("pt-BR"));
+    });
+
+    // Colunas checks
+    const colSet = new Set(
+      String(fields["Colunas"] || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    const colContainer = byId("shortcut-columns-checks");
+    colContainer.replaceChildren();
+    FIELDS.forEach((fld) => {
+      const label = createElement("label", "check-option");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = fld;
+      cb.name = "shortcut-col";
+      cb.checked = colSet.has(fld);
+      label.append(cb, document.createTextNode(" " + fld));
+      colContainer.appendChild(label);
+    });
+
+    // Categorias-Filtradas
+    state.shortcutSelectedCategories = new Set(
+      String(fields["Categorias-Filtradas"] || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    renderShortcutCategoryBadges();
+
+    dialogOpen(byId("shortcut-dialog"));
+  }
+
+  function renderShortcutCategoryBadges() {
+    const badgesContainer = byId("shortcut-cat-badges");
+    badgesContainer.replaceChildren();
+
+    state.shortcutSelectedCategories.forEach((cat) => {
+      const badge = createElement("span", "cat-badge", cat);
+      const removeBtn = createElement("button", "cat-badge-remove", "×");
+      removeBtn.type = "button";
+      removeBtn.addEventListener("click", () => {
+        state.shortcutSelectedCategories.delete(cat);
+        renderShortcutCategoryBadges();
+      });
+      badge.appendChild(removeBtn);
+      badgesContainer.appendChild(badge);
+    });
+  }
+
+  function setupShortcutCategoryDropdown() {
+    const searchInput = byId("shortcut-cat-search");
+    const dropdown = byId("shortcut-cat-dropdown");
+    const itemsContainer = byId("shortcut-cat-items");
+
+    function getExistingCategories() {
+      const set = new Set();
+      state.records.forEach((r) => {
+        const cat = String(currentFields(r).Categoria || "").trim();
+        if (cat) set.add(cat);
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    }
+
+    function renderList(query) {
+      itemsContainer.replaceChildren();
+      const all = getExistingCategories();
+      const q = String(query || "").trim().toLocaleLowerCase("pt-BR");
+      const filtered = all.filter((cat) => !q || cat.toLocaleLowerCase("pt-BR").includes(q));
+
+      if (filtered.length === 0) {
+        itemsContainer.appendChild(createElement("p", "filter-menu-empty", "Nenhuma categoria encontrada"));
+        return;
+      }
+
+      filtered.forEach((cat) => {
+        const label = createElement("label", "check-option");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = cat;
+        cb.checked = state.shortcutSelectedCategories.has(cat);
+        cb.addEventListener("change", () => {
+          if (cb.checked) state.shortcutSelectedCategories.add(cat);
+          else state.shortcutSelectedCategories.delete(cat);
+          renderShortcutCategoryBadges();
+        });
+        label.append(cb, document.createTextNode(" " + cat));
+        itemsContainer.appendChild(label);
+      });
+    }
+
+    searchInput.addEventListener("focus", () => {
+      dropdown.hidden = false;
+      renderList(searchInput.value);
+    });
+
+    searchInput.addEventListener("input", () => {
+      renderList(searchInput.value);
+    });
+
+    byId("shortcut-cat-select-all").addEventListener("click", () => {
+      getExistingCategories().forEach((cat) => state.shortcutSelectedCategories.add(cat));
+      renderList(searchInput.value);
+      renderShortcutCategoryBadges();
+    });
+
+    byId("shortcut-cat-clear").addEventListener("click", () => {
+      state.shortcutSelectedCategories.clear();
+      renderList(searchInput.value);
+      renderShortcutCategoryBadges();
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.hidden = true;
+      }
+    });
+  }
+
+  function saveShortcutForm() {
+    const name = byId("shortcut-name-input").value.trim();
+    if (!name) return;
+
+    const cats = Array.from(state.shortcutSelectedCategories).join(", ");
+    const onlyProj = byId("shortcut-projects-select").value;
+    const dupCats = byId("shortcut-duplicate-select").value;
+    const active = byId("shortcut-active-switch").checked;
+
+    const selectedStatus = Array.from(document.querySelectorAll('input[name="shortcut-status"]:checked'))
+      .map((cb) => cb.value)
+      .join(", ");
+
+    const selectedCols = Array.from(document.querySelectorAll('input[name="shortcut-col"]:checked'))
+      .map((cb) => cb.value)
+      .join(", ");
+
+    const fields = {
+      "Nome-Button": name,
+      "Categorias-Filtradas": cats,
+      "Apenas-Projetos": onlyProj,
+      "Status-Selecionados": selectedStatus,
+      "Categorias-Duplicadas": dupCats,
+      "Colunas": selectedCols,
+      "Ativar-Atalho": active
+    };
+
+    if (state.activeEditingShortcut) {
+      state.activeEditingShortcut.fields = fields;
+      state.activeEditingShortcut.isModified = true;
+    } else {
+      state.shortcuts.push({
+        id: makeId(),
+        rowNumber: null,
+        fields,
+        isNew: true,
+        isModified: false
+      });
+    }
+
+    closeDialog(byId("shortcut-dialog"));
+    renderShortcutsBar();
+    updatePendingControls();
+    notify("Atalho atualizado localmente. Salve para gravar na planilha.");
+  }
+
+  function deleteShortcut() {
+    const shortcut = state.activeEditingShortcut;
+    if (!shortcut) return;
+
+    if (shortcut.rowNumber) {
+      state.shortcutDeletes.add(shortcut.rowNumber);
+    }
+    state.shortcuts = state.shortcuts.filter((s) => s !== shortcut);
+
+    closeDialog(byId("shortcut-dialog"));
+    renderShortcutsBar();
+    updatePendingControls();
+    notify("Atalho excluído localmente. Salve para gravar na planilha.");
+  }
+
+  /* -------------------------------------------------------------
+     EVENTOS E INICIALIZAÇÃO
+     ------------------------------------------------------------- */
   function bindEvents() {
     byId("theme-toggle").addEventListener("click", toggleTheme);
-    byId("save-changes").addEventListener("click", saveChanges);
+    byId("save-changes").addEventListener("click", checkAndConfirmSave);
     byId("cancel-changes").addEventListener("click", cancelAllChanges);
     byId("add-task").addEventListener("click", () => dialogOpen(byId("task-dialog")));
     byId("search-input").addEventListener("input", renderTable);
@@ -806,6 +1492,7 @@
       button.addEventListener("click", () => closeDialog(byId(button.dataset.close)));
     });
 
+    // Submissão de Nova Tarefa
     byId("task-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -828,21 +1515,90 @@
       notify("Tarefa adicionada à lista. Salve para gravar na planilha.");
     });
 
+    // Submissão de Status
     byId("status-form").addEventListener("submit", (event) => {
       event.preventDefault();
       applyStatusChange();
     });
     byId("cancel-status").addEventListener("click", cancelStatusChange);
-    byId("status-dialog").addEventListener("cancel", () => {
-      state.pendingStatus = null;
-      renderTable();
-    });
-    byId("status-dialog").addEventListener("close", () => {
-      if (state.pendingStatus) {
-        state.pendingStatus = null;
+
+    // Modal Conflito de Categoria
+    byId("close-category-conflict").addEventListener("click", () => closeDialog(byId("category-conflict-dialog")));
+    byId("cat-apply-single").addEventListener("click", () => {
+      if (state.categoryConflict) {
+        setPendingValue(state.categoryConflict.record, "Categoria", state.categoryConflict.newVal);
+        state.categoryConflict = null;
+        closeDialog(byId("category-conflict-dialog"));
         renderTable();
       }
     });
+    byId("cat-apply-all").addEventListener("click", () => {
+      if (state.categoryConflict) {
+        const { oldVal, newVal, record } = state.categoryConflict;
+        // Altera todas as linhas daquela categoria
+        state.records.forEach((r) => {
+          if (String(currentFields(r).Categoria || "").trim() === oldVal) {
+            setPendingValue(r, "Categoria", newVal);
+          }
+        });
+        // Atualiza atalhos que referenciam oldVal
+        state.shortcuts.forEach((sc) => {
+          const rawCats = String(sc.fields["Categorias-Filtradas"] || "");
+          if (rawCats) {
+            const list = rawCats.split(",").map((s) => s.trim());
+            if (list.includes(oldVal)) {
+              const updatedList = list.map((item) => (item === oldVal ? newVal : item));
+              sc.fields["Categorias-Filtradas"] = updatedList.join(", ");
+              sc.isModified = true;
+            }
+          }
+        });
+
+        state.categoryConflict = null;
+        closeDialog(byId("category-conflict-dialog"));
+        renderShortcutsBar();
+        renderTable();
+        notify("Categoria atualizada em todas as linhas correspondentes e nos atalhos.");
+      }
+    });
+
+    // Modal Confirmação Salvar Múltiplas Linhas
+    byId("close-save-confirm").addEventListener("click", () => closeDialog(byId("save-confirm-dialog")));
+    byId("cancel-save-confirm").addEventListener("click", () => closeDialog(byId("save-confirm-dialog")));
+    byId("proceed-save-confirm").addEventListener("click", () => {
+      closeDialog(byId("save-confirm-dialog"));
+      executeSave();
+    });
+
+    // Atalhos
+    byId("create-shortcut-btn").addEventListener("click", () => openShortcutForm(null));
+    byId("shortcut-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveShortcutForm();
+    });
+    byId("delete-shortcut-btn").addEventListener("click", deleteShortcut);
+    setupShortcutCategoryDropdown();
+
+    // Context Menu Items
+    byId("context-select-row").addEventListener("click", () => {
+      if (activeContextRecord) {
+        state.selectionMode = true;
+        state.selectedRowIds.add(activeContextRecord.id);
+        closeContextMenu();
+        renderTable();
+      }
+    });
+    byId("context-duplicate-row").addEventListener("click", () => {
+      if (activeContextRecord) {
+        const rec = activeContextRecord;
+        closeContextMenu();
+        duplicateRecord(rec);
+      }
+    });
+
+    // Floating Selection Bar
+    byId("copy-selection-btn").addEventListener("click", copySelectedRows);
+    byId("clear-selection-btn").addEventListener("click", clearSelection);
 
     // Filtro por Coluna Eventos
     byId("close-column-filter").addEventListener("click", closeColumnFilterMenu);
@@ -894,7 +1650,6 @@
       if (state.activeFilterField) {
         const allValues = getUniqueFieldValues(state.activeFilterField);
         if (tempSelectedValues.size === allValues.length) {
-          // Se todos estão selecionados, não precisa filtrar
           state.columnFilters.delete(state.activeFilterField);
         } else {
           state.columnFilters.set(state.activeFilterField, new Set(tempSelectedValues));
@@ -911,7 +1666,29 @@
       }
     });
 
-    byId("task-dialog").addEventListener("cancel", (event) => event.preventDefault());
+    // Fechar seletor "Colunas" ao clicar fora (desktop e mobile)
+    const colPickerDetails = byId("column-picker-details");
+    document.addEventListener("click", (e) => {
+      if (colPickerDetails && colPickerDetails.open) {
+        if (!colPickerDetails.contains(e.target)) {
+          colPickerDetails.open = false;
+        }
+      }
+    });
+
+    // Fechar context menu ao clicar/tocar fora
+    document.addEventListener("click", (e) => {
+      if (!rowContextMenu.hidden && !rowContextMenu.contains(e.target)) {
+        closeContextMenu();
+      }
+    });
+    document.addEventListener("touchstart", (e) => {
+      if (!rowContextMenu.hidden && !rowContextMenu.contains(e.target)) {
+        closeContextMenu();
+      }
+    }, { passive: true });
+
+    setupCategoryAutocomplete();
   }
 
   function initialize() {

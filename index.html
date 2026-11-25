@@ -39,6 +39,25 @@
       </div>
     </section>
 
+    <!-- Barra de Atalhos Rápidos -->
+    <section id="shortcuts-section" class="shortcuts-section" aria-label="Atalhos rápidos">
+      <div class="shortcuts-header">
+        <div class="shortcuts-title-group">
+          <span class="control-label">Atalhos rápidos:</span>
+          <div id="shortcuts-container" class="shortcuts-container"></div>
+        </div>
+        <div class="shortcuts-actions-group">
+          <button id="create-shortcut-btn" class="button button-quiet" type="button">
+            <span aria-hidden="true">＋</span> Criar atalho
+          </button>
+          <details id="inactive-shortcuts-details" class="inactive-shortcuts-details" hidden>
+            <summary class="button button-quiet">Atalhos inativos (<span id="inactive-shortcuts-count">0</span>) ▾</summary>
+            <div id="inactive-shortcuts-list" class="inactive-shortcuts-list"></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
     <section class="card controls-card" aria-label="Filtros e colunas">
       <div class="control-row">
         <label class="search-field">
@@ -60,13 +79,24 @@
         </div>
         <div class="control-actions">
           <button id="clear-column-filters" class="button button-quiet" type="button" disabled>Limpar filtros de coluna</button>
-          <details class="column-picker">
-            <summary>Colunas <span aria-hidden="true">▾</span></summary>
+          <details id="column-picker-details" class="column-picker">
+            <summary id="column-picker-summary">Colunas <span aria-hidden="true">▾</span></summary>
             <div id="column-options" class="column-options" aria-label="Colunas visíveis"></div>
           </details>
         </div>
       </div>
     </section>
+
+    <!-- Barra Flutuante de Seleção Múltipla -->
+    <div id="selection-bar" class="selection-bar" hidden>
+      <div class="selection-info">
+        <span id="selection-count">0</span> linha(s) selecionada(s)
+      </div>
+      <div class="selection-actions">
+        <button id="copy-selection-btn" class="button button-primary" type="button">📋 Copiar linhas</button>
+        <button id="clear-selection-btn" class="button button-secondary" type="button">Sair da seleção</button>
+      </div>
+    </div>
 
     <section class="card table-card" aria-label="Tarefas da Database">
       <div class="table-toolbar">
@@ -74,9 +104,9 @@
           <p id="result-count" class="result-count" aria-live="polite">Carregando tarefas...</p>
           <div id="result-summary" class="result-stats" aria-live="polite"></div>
         </div>
-        <p class="edit-hint">As edições só serão gravadas após salvar. Arraste o canto inferior direito de qualquer Descrição para expandir o texto.</p>
+        <p class="edit-hint">As edições só serão gravadas após salvar. Arraste as bordas dos cabeçalhos para redimensionar colunas.</p>
       </div>
-      <div class="table-scroll">
+      <div class="table-scroll" id="table-scroll-container">
         <table>
           <thead><tr id="table-head"></tr></thead>
           <tbody id="table-body"></tbody>
@@ -91,6 +121,7 @@
     <p class="footer-note">Uma visão simples e organizada do seu trabalho.</p>
   </main>
 
+  <!-- Modal Adicionar Tarefa -->
   <dialog id="task-dialog" class="modal modal-wide">
     <form id="task-form" method="dialog">
       <div class="modal-heading">
@@ -98,7 +129,11 @@
         <button class="icon-button" type="button" data-close="task-dialog" aria-label="Fechar">×</button>
       </div>
       <div class="form-grid">
-        <label class="form-field"><span>Categoria</span><input name="Categoria" required maxlength="200"></label>
+        <div class="form-field form-field-autocomplete">
+          <label for="task-category-input"><span>Categoria</span></label>
+          <input id="task-category-input" name="Categoria" required maxlength="200" autocomplete="off">
+          <div id="task-category-suggestions" class="autocomplete-dropdown" hidden></div>
+        </div>
         <label class="form-field"><span>Descrição</span><input name="Descrição" required maxlength="500"></label>
         <label class="form-field"><span>Recebedor</span><input name="Recebedor" maxlength="200"></label>
         <label class="form-field"><span>Preço total</span><input name="Preço total" type="number" step="0.01"></label>
@@ -116,6 +151,7 @@
     </form>
   </dialog>
 
+  <!-- Modal Atualizar Status -->
   <dialog id="status-dialog" class="modal">
     <form id="status-form" method="dialog">
       <div class="modal-heading">
@@ -130,6 +166,125 @@
       </div>
     </form>
   </dialog>
+
+  <!-- Modal Editar Categoria (Linha Única vs Todas) -->
+  <dialog id="category-conflict-dialog" class="modal">
+    <div class="modal-heading">
+      <div><p class="eyebrow">ATUALIZAR CATEGORIA</p><h2>Alterar Categoria</h2></div>
+      <button class="icon-button" type="button" id="close-category-conflict" aria-label="Fechar">×</button>
+    </div>
+    <p class="modal-copy" id="category-conflict-desc">
+      Outras tarefas compartilham a mesma categoria. Deseja aplicar esta alteração apenas nesta tarefa ou em todas as tarefas dessa categoria?
+    </p>
+    <div class="modal-actions modal-actions-stack">
+      <button id="cat-apply-single" class="button button-secondary" type="button">Apenas nesta linha</button>
+      <button id="cat-apply-all" class="button button-primary" type="button">Em todas as linhas dessa categoria</button>
+    </div>
+  </dialog>
+
+  <!-- Modal Confirmar Salvar Alterações Múltiplas -->
+  <dialog id="save-confirm-dialog" class="modal">
+    <div class="modal-heading">
+      <div><p class="eyebrow">CONFIRMAR GRAVAÇÃO</p><h2>Salvar alterações</h2></div>
+      <button class="icon-button" type="button" id="close-save-confirm" aria-label="Fechar">×</button>
+    </div>
+    <p class="modal-copy" id="save-confirm-message">
+      Você está prestes a gravar as alterações na planilha.
+    </p>
+    <div class="modal-actions">
+      <button id="cancel-save-confirm" class="button button-secondary" type="button">Voltar</button>
+      <button id="proceed-save-confirm" class="button button-primary" type="button">Confirmar e salvar</button>
+    </div>
+  </dialog>
+
+  <!-- Modal Criar / Editar Atalho -->
+  <dialog id="shortcut-dialog" class="modal modal-wide">
+    <form id="shortcut-form" method="dialog">
+      <div class="modal-heading">
+        <div><p class="eyebrow" id="shortcut-dialog-eyebrow">CONFIGURAÇÃO DE ATALHO</p><h2 id="shortcut-dialog-title">Editar atalho</h2></div>
+        <button class="icon-button" type="button" data-close="shortcut-dialog" aria-label="Fechar">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="form-field form-field-full">
+          <span>Nome do botão (Nome-Button) *</span>
+          <input id="shortcut-name-input" name="Nome-Button" required maxlength="100" placeholder="Ex: Backlog, Projetos...">
+        </label>
+        
+        <div class="form-field form-field-full">
+          <span>Categorias filtradas</span>
+          <div class="shortcut-cat-selector">
+            <input id="shortcut-cat-search" type="text" placeholder="Clique para selecionar categorias existentes..." autocomplete="off">
+            <div id="shortcut-cat-dropdown" class="shortcut-cat-dropdown" hidden>
+              <div class="cat-dropdown-toolbar">
+                <button type="button" id="shortcut-cat-select-all" class="button button-quiet">Selecionar tudo</button>
+                <button type="button" id="shortcut-cat-clear" class="button button-quiet">Limpar</button>
+              </div>
+              <div id="shortcut-cat-items" class="shortcut-cat-items"></div>
+            </div>
+          </div>
+          <div id="shortcut-cat-badges" class="shortcut-cat-badges"></div>
+        </div>
+
+        <label class="form-field">
+          <span>Apenas Projetos</span>
+          <select id="shortcut-projects-select" name="Apenas-Projetos">
+            <option value="">Padrão do site</option>
+            <option value="TRUE">TRUE (Somente projetos)</option>
+            <option value="FALSE">FALSE (Ocultar projetos)</option>
+          </select>
+        </label>
+
+        <label class="form-field">
+          <span>Categorias duplicadas</span>
+          <select id="shortcut-duplicate-select" name="Categorias-Duplicadas">
+            <option value="">Padrão do site</option>
+            <option value="TRUE">TRUE (Não mostrar duplicadas)</option>
+            <option value="FALSE">FALSE (Mostrar todas)</option>
+          </select>
+        </label>
+
+        <div class="form-field form-field-full">
+          <span>Status selecionados (Vazio = padrão do site)</span>
+          <div class="shortcut-status-checks">
+            <label class="check-option"><input type="checkbox" name="shortcut-status" value="Aberto"> Aberto</label>
+            <label class="check-option"><input type="checkbox" name="shortcut-status" value="Resolvido"> Resolvido</label>
+            <label class="check-option"><input type="checkbox" name="shortcut-status" value="Cancelado"> Cancelado</label>
+          </div>
+        </div>
+
+        <div class="form-field form-field-full">
+          <span>Colunas visíveis (Vazio = padrão do site)</span>
+          <div id="shortcut-columns-checks" class="shortcut-columns-checks"></div>
+        </div>
+
+        <div class="form-field form-field-full form-switch-field">
+          <label class="switch-control">
+            <input id="shortcut-active-switch" type="checkbox" checked>
+            <span class="switch-slider"></span>
+            <span class="switch-label">Ativar atalho na barra principal (Ativar-Atalho)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-actions shortcut-modal-actions">
+        <button id="delete-shortcut-btn" class="button button-danger" type="button" hidden>Excluir permanentemente</button>
+        <div class="shortcut-actions-right">
+          <button class="button button-secondary" type="button" data-close="shortcut-dialog">Cancelar</button>
+          <button class="button button-primary" type="submit">Salvar atalho</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Menu de Contexto Customizado de Linha -->
+  <div id="row-context-menu" class="row-context-menu" hidden>
+    <button id="context-select-row" class="context-item" type="button">
+      <span class="context-icon" aria-hidden="true">☑</span> Selecionar
+    </button>
+    <button id="context-duplicate-row" class="context-item" type="button">
+      <span class="context-icon" aria-hidden="true">⧉</span> Duplicar linha
+    </button>
+  </div>
 
   <form id="transport-form" class="sr-only" method="post" target="transport-frame">
     <input type="hidden" name="payload">

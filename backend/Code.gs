@@ -1,4 +1,6 @@
 const SHEET_NAME = "Database";
+const SHORTCUTS_SHEET_NAME = "Atalhos";
+
 const REQUIRED_HEADERS = [
   "Categoria",
   "Descrição",
@@ -9,6 +11,17 @@ const REQUIRED_HEADERS = [
   "Recebedor",
   "Preço total"
 ];
+
+const SHORTCUT_HEADERS = [
+  "Nome-Button",
+  "Categorias-Filtradas",
+  "Apenas-Projetos",
+  "Status-Selecionados",
+  "Categorias-Duplicadas",
+  "Colunas",
+  "Ativar-Atalho"
+];
+
 const VALID_STATUSES = ["Aberto", "Resolvido", "Cancelado"];
 
 function doGet(e) {
@@ -17,7 +30,8 @@ function doGet(e) {
     const action = e && e.parameter && e.parameter.action ? e.parameter.action : "list";
     if (action !== "list") throw new Error("Ação GET não suportada.");
     const records = readRecords_();
-    return jsonpResponse_({ ok: true, records: records }, callback);
+    const shortcuts = readShortcuts_();
+    return jsonpResponse_({ ok: true, records: records, shortcuts: shortcuts }, callback);
   } catch (error) {
     return jsonpResponse_({ ok: false, error: error.message || String(error) }, callback);
   }
@@ -56,6 +70,46 @@ function readRecords_() {
     records.push({ rowNumber: index + 1, fields: fields });
   }
   return records;
+}
+
+function readShortcuts_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHORTCUTS_SHEET_NAME);
+  if (!sheet) return [];
+
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (!values || values.length <= 1) return [];
+
+  const headers = values[0];
+  const colMap = {};
+  headers.forEach((h, idx) => {
+    colMap[String(h).trim()] = idx;
+  });
+
+  const shortcuts = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const name = colMap["Nome-Button"] != null ? String(row[colMap["Nome-Button"]] || "").trim() : "";
+    if (!name) continue;
+
+    const rawActive = colMap["Ativar-Atalho"] != null ? row[colMap["Ativar-Atalho"]] : true;
+    const active = rawActive === "" ? true : (rawActive === true || String(rawActive).toUpperCase() === "TRUE" || String(rawActive).toUpperCase() === "VERDADEIRO");
+
+    shortcuts.push({
+      rowNumber: i + 1,
+      fields: {
+        "Nome-Button": name,
+        "Categorias-Filtradas": colMap["Categorias-Filtradas"] != null ? String(row[colMap["Categorias-Filtradas"]] || "") : "",
+        "Apenas-Projetos": colMap["Apenas-Projetos"] != null ? String(row[colMap["Apenas-Projetos"]] || "") : "",
+        "Status-Selecionados": colMap["Status-Selecionados"] != null ? String(row[colMap["Status-Selecionados"]] || "") : "",
+        "Categorias-Duplicadas": colMap["Categorias-Duplicadas"] != null ? String(row[colMap["Categorias-Duplicadas"]] || "") : "",
+        "Colunas": colMap["Colunas"] != null ? String(row[colMap["Colunas"]] || "") : "",
+        "Ativar-Atalho": active
+      }
+    });
+  }
+  return shortcuts;
 }
 
 function saveChanges_(request) {
@@ -121,10 +175,93 @@ function saveChanges_(request) {
       sheet.insertRowsBefore(2, rowsToWrite.length);
       sheet.getRange(2, 1, rowsToWrite.length, lastColumn).setValues(rowsToWrite);
     }
+
+    // Process shortcuts if present
+    const shortcutOps = request.shortcuts;
+    if (shortcutOps && typeof shortcutOps === "object") {
+      saveShortcuts_(shortcutOps);
+    }
+
     SpreadsheetApp.flush();
     return { updated: updates.length, inserted: newRecords.length };
   } finally {
     lock.releaseLock();
+  }
+}
+
+function getShortcutsSheetOrCreate_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHORTCUTS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHORTCUTS_SHEET_NAME);
+    sheet.getRange(1, 1, 1, SHORTCUT_HEADERS.length).setValues([SHORTCUT_HEADERS]);
+  }
+  return sheet;
+}
+
+function saveShortcuts_(shortcutOps) {
+  const sheet = getShortcutsSheetOrCreate_();
+  let lastColumn = sheet.getLastColumn();
+  if (lastColumn < SHORTCUT_HEADERS.length) {
+    sheet.getRange(1, 1, 1, SHORTCUT_HEADERS.length).setValues([SHORTCUT_HEADERS]);
+    lastColumn = SHORTCUT_HEADERS.length;
+  }
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const colMap = {};
+  headers.forEach((h, idx) => {
+    colMap[String(h).trim()] = idx + 1;
+  });
+
+  SHORTCUT_HEADERS.forEach((h) => {
+    if (!colMap[h]) {
+      lastColumn += 1;
+      sheet.getRange(1, lastColumn).setValue(h);
+      colMap[h] = lastColumn;
+    }
+  });
+
+  // Handle deletions first (sorted descending by rowNumber)
+  const deletes = Array.isArray(shortcutOps.deletes) ? shortcutOps.deletes : [];
+  const rowsToDelete = deletes
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 2)
+    .sort((a, b) => b - a);
+
+  rowsToDelete.forEach((r) => {
+    if (r <= sheet.getLastRow()) {
+      sheet.deleteRow(r);
+    }
+  });
+
+  // Handle updates
+  const updates = Array.isArray(shortcutOps.updates) ? shortcutOps.updates : [];
+  updates.forEach((up) => {
+    const r = Number(up.rowNumber);
+    if (Number.isInteger(r) && r >= 2 && r <= sheet.getLastRow()) {
+      const f = up.fields || {};
+      Object.keys(f).forEach((key) => {
+        if (colMap[key]) {
+          sheet.getRange(r, colMap[key]).setValue(f[key]);
+        }
+      });
+    }
+  });
+
+  // Handle creates
+  const creates = Array.isArray(shortcutOps.creates) ? shortcutOps.creates : [];
+  if (creates.length > 0) {
+    const rowsToAdd = creates.map((item) => {
+      const f = item.fields || item;
+      const row = new Array(lastColumn).fill("");
+      SHORTCUT_HEADERS.forEach((key) => {
+        if (colMap[key]) {
+          row[colMap[key] - 1] = f[key] != null ? f[key] : "";
+        }
+      });
+      return row;
+    });
+    const nextRow = sheet.getLastRow() + 1;
+    sheet.getRange(nextRow, 1, rowsToAdd.length, lastColumn).setValues(rowsToAdd);
   }
 }
 
