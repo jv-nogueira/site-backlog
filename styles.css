@@ -351,6 +351,7 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .edit-hint { margin: 0; color: var(--muted); font-size: 11px; }
 
 /* Rolagem nativa: sem max-height forçado na base de dados */
+.table-card { margin-top: 17px; overflow: visible; }
 .table-scroll {
   overflow-x: auto;
   position: relative;
@@ -361,11 +362,13 @@ table {
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
+  table-layout: fixed;
 }
 thead {
   position: sticky;
   top: 0;
   z-index: 6;
+  background: var(--table-head-bg);
 }
 thead tr {
   background: var(--table-head-bg);
@@ -381,8 +384,13 @@ th {
   letter-spacing: .2px;
   white-space: nowrap;
   border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--table-border);
   user-select: none;
   box-sizing: border-box;
+  min-width: 24px;
+}
+th:last-child {
+  border-right: 0;
 }
 
 /* Primeira coluna congelada (Sticky à esquerda) */
@@ -392,14 +400,12 @@ th.is-first-col {
   top: 0;
   z-index: 8;
   background: var(--table-head-bg);
-  box-shadow: 2px 0 0 var(--line);
 }
 td.is-first-col {
   position: sticky;
   left: 0;
   z-index: 5;
   background: var(--surface);
-  box-shadow: 2px 0 0 var(--line);
 }
 tbody tr:hover td.is-first-col {
   background: var(--surface-hover);
@@ -486,12 +492,17 @@ tbody tr.context-focus-row td.is-first-col {
 }
 
 td {
-  padding: 6px 8px;
+  padding: 4px 8px;
   border-top: 1px solid var(--table-border);
+  border-right: 1px solid var(--table-border);
   vertical-align: middle;
   background: var(--surface);
   overflow: hidden;
   user-select: none;
+  min-width: 24px;
+}
+td:last-child {
+  border-right: 0;
 }
 tbody tr:hover { background: var(--surface-hover); }
 tbody tr.selected-row {
@@ -508,22 +519,29 @@ tbody tr.context-focus-row td {
   background: var(--accent-soft) !important;
 }
 
-/* Modo Leitura / Rígido (Padrão) vs Modo Edição (após duplo clique) */
+/* Modo Leitura / Rígido (Padrão 1 linha compacta) vs Modo Edição (após duplo clique) */
 .cell-readonly {
-  display: flex;
-  align-items: center;
+  display: block;
   position: relative;
-  min-height: 31px;
-  padding: 5px 6px;
+  height: 26px;
+  line-height: 26px;
+  padding: 0 18px 0 4px;
   font-size: 11px;
   color: var(--input-color);
-  line-height: 1.4;
   border-radius: 4px;
   cursor: default;
-  word-break: break-word;
-  white-space: pre-wrap;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   box-sizing: border-box;
+}
+.cell-readonly.is-expanded {
+  height: auto;
+  min-height: 26px;
+  line-height: 1.4;
+  padding: 4px 18px 4px 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .cell-readonly:hover {
   background: rgba(71, 104, 223, 0.05);
@@ -531,6 +549,31 @@ tbody tr.context-focus-row td {
 .cell-readonly.is-empty {
   color: var(--muted);
   font-style: italic;
+}
+
+/* Header rename & drag-and-drop reorder */
+.th-rename-input {
+  width: 100%;
+  min-width: 40px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--shadow-focus);
+}
+th.is-dragging-col {
+  opacity: 0.5;
+  background: var(--accent-soft);
+}
+th.drag-over-left {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+th.drag-over-right {
+  box-shadow: inset -3px 0 0 var(--accent);
 }
 
 /* Alça / Botão de arraste para expandir visualização de texto longo */
@@ -568,9 +611,9 @@ td.is-editing input:not([type="checkbox"]),
 td.is-editing select,
 td.is-editing textarea {
   width: 100%;
-  min-width: 90px;
-  min-height: 31px;
-  padding: 6px 7px;
+  min-width: 24px;
+  min-height: 26px;
+  padding: 4px 6px;
   border: 1px solid var(--border-focus);
   border-radius: 5px;
   outline: none;
@@ -585,7 +628,7 @@ td.is-editing textarea {
 }
 
 /* Category cell */
-.category-cell { display: flex; align-items: center; gap: 4px; min-width: 140px; }
+.category-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .expand-button { flex: 0 0 23px; width: 23px; height: 23px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; }
 .expand-button:hover { border-color: var(--accent); color: var(--accent); }
 .subtask-row td:first-child { padding-left: 28px; }
@@ -616,6 +659,7 @@ td.is-editing textarea {
 
 .project-cell { text-align: center; }
 .empty-state { min-height: 210px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.empty-state[hidden] { display: none !important; }
 .empty-state strong { color: var(--ink); font-size: 13px; }
 .empty-icon { margin-bottom: 4px; color: var(--muted); font-size: 25px; }
 .footer-note { margin: 15px 2px 0; color: var(--muted); font-size: 10px; }

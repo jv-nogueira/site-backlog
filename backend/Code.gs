@@ -29,9 +29,14 @@ function doGet(e) {
   try {
     const action = e && e.parameter && e.parameter.action ? e.parameter.action : "list";
     if (action !== "list") throw new Error("Ação GET não suportada.");
-    const records = readRecords_();
+    const data = readRecords_();
     const shortcuts = readShortcuts_();
-    return jsonpResponse_({ ok: true, records: records, shortcuts: shortcuts }, callback);
+    return jsonpResponse_({
+      ok: true,
+      records: data.records,
+      columns: data.columns,
+      shortcuts: shortcuts
+    }, callback);
   } catch (error) {
     return jsonpResponse_({ ok: false, error: error.message || String(error) }, callback);
   }
@@ -57,19 +62,50 @@ function doPost(e) {
   }
 }
 
+function getColumnAliases_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty("COLUMN_ALIASES");
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveColumnAliases_(aliases) {
+  PropertiesService.getScriptProperties().setProperty("COLUMN_ALIASES", JSON.stringify(aliases || {}));
+}
+
 function readRecords_() {
   const sheet = getDatabaseSheet_();
   const range = sheet.getDataRange();
   const values = range.getValues();
   if (!values.length) throw new Error("A aba Database não contém a linha de cabeçalho.");
-  const columns = getColumnMap_(values[0]);
+  const headers = values[0];
+  const columns = getColumnMap_(headers);
+  const orderedCols = getOrderedColumns_(headers, columns);
   const records = [];
   for (let index = 1; index < values.length; index += 1) {
     const fields = rowToFields_(values[index], columns);
     if (!String(fields["Categoria"] || "").trim() && !String(fields["Descrição"] || "").trim()) continue;
     records.push({ rowNumber: index + 1, fields: fields });
   }
-  return records;
+  return { records: records, columns: orderedCols };
+}
+
+function getOrderedColumns_(headers, colMap) {
+  const result = [];
+  const reverseMap = {};
+  Object.keys(colMap).forEach(function (canonical) {
+    reverseMap[colMap[canonical]] = canonical;
+  });
+  headers.forEach(function (h, idx) {
+    const colNum = idx + 1;
+    const canonical = reverseMap[colNum];
+    if (canonical) {
+      result.push({ canonical: canonical, label: String(h || canonical).trim() });
+    }
+  });
+  return result;
 }
 
 function normalizeHeaderKey_(header) {
@@ -212,6 +248,24 @@ function saveChanges_(request) {
       saveShortcuts_(shortcutOps);
     }
 
+    // Process column renames (row 1 + aliases)
+    if (request.columnRenames && typeof request.columnRenames === "object") {
+      const aliases = getColumnAliases_();
+      Object.keys(request.columnRenames).forEach(function (canonical) {
+        const newLabel = String(request.columnRenames[canonical] || "").trim();
+        if (newLabel && columns[canonical]) {
+          sheet.getRange(1, columns[canonical]).setValue(newLabel);
+          aliases[canonical] = newLabel;
+        }
+      });
+      saveColumnAliases_(aliases);
+    }
+
+    // Process column reorder
+    if (Array.isArray(request.columnOrder) && request.columnOrder.length > 0) {
+      reorderSheetColumns_(sheet, request.columnOrder);
+    }
+
     SpreadsheetApp.flush();
     return { updated: updates.length, inserted: newRecords.length };
   } finally {
@@ -315,6 +369,49 @@ function saveShortcuts_(shortcutOps) {
   }
 }
 
+function reorderSheetColumns_(sheet, desiredCanonicalOrder) {
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (!lastColumn || !lastRow) return;
+
+  const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const colMap = getColumnMap_(currentHeaders);
+
+  // Build target column index list (1-based)
+  const targetSourceCols = [];
+  const usedCols = {};
+  desiredCanonicalOrder.forEach(function (canonical) {
+    if (colMap[canonical] && !usedCols[colMap[canonical]]) {
+      targetSourceCols.push(colMap[canonical]);
+      usedCols[colMap[canonical]] = true;
+    }
+  });
+  // Append any remaining columns not in desiredCanonicalOrder
+  for (let c = 1; c <= lastColumn; c += 1) {
+    if (!usedCols[c]) {
+      targetSourceCols.push(c);
+    }
+  }
+
+  // Check if order actually changed
+  let changed = false;
+  for (let i = 0; i < targetSourceCols.length; i += 1) {
+    if (targetSourceCols[i] !== i + 1) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return;
+
+  const allValues = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
+  const reorderedValues = allValues.map(function (row) {
+    return targetSourceCols.map(function (srcCol) {
+      return row[srcCol - 1];
+    });
+  });
+  sheet.getRange(1, 1, lastRow, lastColumn).setValues(reorderedValues);
+}
+
 function getDatabaseSheet_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('A aba "' + SHEET_NAME + '" não foi encontrada.');
@@ -322,13 +419,30 @@ function getDatabaseSheet_() {
 }
 
 function getColumnMap_(headers) {
+  const aliases = getColumnAliases_(); // canonical -> currentHeaderName
+  const reverseAliases = {};
+  Object.keys(aliases).forEach(function (canonical) {
+    if (aliases[canonical]) {
+      reverseAliases[String(aliases[canonical]).trim()] = canonical;
+    }
+  });
+
   const map = {};
   headers.forEach(function (header, index) {
-    const colName = String(header);
-    if (REQUIRED_HEADERS.indexOf(colName) !== -1 && map[colName]) {
-      throw new Error('Cabeçalho obrigatório duplicado: "' + colName + '".');
+    const colName = String(header || "").trim();
+    if (!colName) return;
+    let canonical = null;
+    if (REQUIRED_HEADERS.indexOf(colName) !== -1) {
+      canonical = colName;
+    } else if (reverseAliases[colName] && REQUIRED_HEADERS.indexOf(reverseAliases[colName]) !== -1) {
+      canonical = reverseAliases[colName];
     }
-    if (colName) map[colName] = index + 1;
+    if (canonical) {
+      if (map[canonical]) {
+        throw new Error('Cabeçalho obrigatório duplicado: "' + colName + '".');
+      }
+      map[canonical] = index + 1;
+    }
   });
   const missing = REQUIRED_HEADERS.filter(function (colName) {
     return !map[colName];

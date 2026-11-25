@@ -13,7 +13,7 @@
   ];
   const DEFAULT_COLUMNS = new Set(["Categoria", "Descrição", "Recebedor", "Preço total"]);
   const STATUSES = ["Aberto", "Resolvido", "Cancelado"];
-  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzZagjTEM9V9Xfn7ncTJxpDII-oNVnGM6byRt0RTXzyYAJ85oWQjMXckqNBxP1gS58P/exec";
+  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzBIU2Jrl9WDd3CV6ROgQYrQ9da6S_Uw7Givaqox0hz0RnxVLvryv69xWh3ccxb5S0r/exec";
   const COLUMN_KEY = "workspace-database-visible-columns";
   const THEME_KEY = "workspace-database-theme";
   const BLANK_VALUE_KEY = "__BLANK_VALUE__";
@@ -44,8 +44,14 @@
     // Pending Category Conflict
     categoryConflict: null, // { record, oldVal, newVal }
 
-    // Column resizing
+    // Column resizing & ordering & renaming
     columnWidths: {}, // field -> px
+    columnOrder: FIELDS.slice(), // canonical field order
+    originalColumnOrder: FIELDS.slice(),
+    columnLabels: {}, // canonical -> display label
+    originalColumnLabels: {},
+    pendingColumnRenames: {}, // canonical -> newLabel
+    columnOrderChanged: false,
 
     // Cell Editing State (Only on double click)
     editingCell: null, // { recordId, field }
@@ -68,6 +74,10 @@
 
   function makeId() {
     return "new-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function getColumnLabel(field) {
+    return state.pendingColumnRenames[field] || state.columnLabels[field] || field;
   }
 
   function currentFields(record) {
@@ -276,7 +286,7 @@
     function onPointerMove(e) {
       const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       const diff = clientX - startX;
-      const newWidth = Math.max(50, startWidth + diff);
+      const newWidth = Math.max(24, startWidth + diff);
       th.style.width = newWidth + "px";
       th.style.minWidth = newWidth + "px";
       state.columnWidths[field] = newWidth;
@@ -386,7 +396,7 @@
       return cell;
     }
 
-    // Campo de texto geral ou Descrição / Observação com alça de arraste
+    // Campo de texto geral ou Descrição / Observação com alça de arraste condicional
     const wrap = createElement("div", "cell-expand-wrap");
     const rawVal = escapeText(values[field]);
     const readSpan = createElement("div", "cell-readonly", rawVal || "—");
@@ -394,11 +404,18 @@
     readSpan.title = "Duplo clique para editar";
     wrap.appendChild(readSpan);
 
-    // Alça de arraste para expandir visualização de células de texto
-    const handle = createElement("div", "cell-expand-handle", "⤡");
-    handle.title = "Arraste para expandir visualização";
-    setupCellExpand(handle, readSpan);
-    wrap.appendChild(handle);
+    if (rawVal) {
+      window.requestAnimationFrame(() => {
+        const hasNewline = rawVal.includes("\n");
+        const overflows = readSpan.scrollWidth > readSpan.clientWidth + 1 || readSpan.scrollHeight > readSpan.clientHeight + 1;
+        if (hasNewline || overflows) {
+          const handle = createElement("div", "cell-expand-handle", "⤡");
+          handle.title = "Arraste para expandir ou duplo clique para recolher";
+          setupCellExpand(handle, readSpan);
+          wrap.appendChild(handle);
+        }
+      });
+    }
 
     cell.appendChild(wrap);
     return cell;
@@ -418,8 +435,9 @@
       const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
       const diffY = clientY - startY;
       const diffX = clientX - startX;
-      const newHeight = Math.max(31, startHeight + diffY);
-      const newWidth = Math.max(80, startWidth + diffX);
+      const newHeight = Math.max(26, startHeight + diffY);
+      const newWidth = Math.max(40, startWidth + diffX);
+      targetEl.classList.add("is-expanded");
       targetEl.style.height = newHeight + "px";
       targetEl.style.maxHeight = "none";
       targetEl.style.width = newWidth + "px";
@@ -449,6 +467,14 @@
 
     handle.addEventListener("mousedown", onDown);
     handle.addEventListener("touchstart", onDown, { passive: false });
+    handle.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      targetEl.classList.remove("is-expanded");
+      targetEl.style.height = "";
+      targetEl.style.maxHeight = "";
+      targetEl.style.width = "";
+    });
   }
 
   /* -------------------------------------------------------------
@@ -575,11 +601,30 @@
     summaryContainer.appendChild(pillProj);
   }
 
+  function reorderColumn(fromField, toField, placeAfter) {
+    if (!fromField || !toField || fromField === toField) return;
+    const order = state.columnOrder.slice();
+    const fromIdx = order.indexOf(fromField);
+    if (fromIdx === -1) return;
+    order.splice(fromIdx, 1);
+    let toIdx = order.indexOf(toField);
+    if (toIdx === -1) return;
+    if (placeAfter) toIdx += 1;
+    order.splice(toIdx, 0, fromField);
+    state.columnOrder = order;
+    state.columnOrderChanged = JSON.stringify(state.columnOrder) !== JSON.stringify(state.originalColumnOrder);
+    renderTable();
+  }
+
   function renderTableHead(columns) {
     tableHead.replaceChildren();
+    let dragSrcField = null;
+
     columns.forEach((field, index) => {
       const th = document.createElement("th");
       if (index === 0) th.classList.add("is-first-col");
+      th.dataset.field = field;
+      th.draggable = true;
 
       if (state.columnWidths[field]) {
         th.style.width = state.columnWidths[field] + "px";
@@ -587,14 +632,52 @@
       }
 
       const content = createElement("div", "th-content");
-      const label = createElement("span", "th-label", field);
+      const label = createElement("span", "th-label", getColumnLabel(field));
+      label.title = "Duplo clique para renomear ou arraste para reordenar";
+
+      // Duplo clique no cabeçalho para renomear coluna
+      label.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        th.draggable = false;
+        const input = createElement("input", "th-rename-input");
+        input.type = "text";
+        input.value = getColumnLabel(field);
+        input.maxLength = 100;
+
+        const commitRename = () => {
+          const newVal = input.value.trim();
+          const origLabel = state.originalColumnLabels[field] || field;
+          if (newVal && newVal !== origLabel) {
+            state.pendingColumnRenames[field] = newVal;
+          } else {
+            delete state.pendingColumnRenames[field];
+          }
+          th.draggable = true;
+          renderTable();
+        };
+
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") {
+            ke.preventDefault();
+            input.blur();
+          } else if (ke.key === "Escape") {
+            th.draggable = true;
+            renderTable();
+          }
+        });
+        input.addEventListener("blur", commitRename);
+        label.replaceWith(input);
+        input.focus();
+        input.select();
+      });
+
       content.appendChild(label);
 
       // Botão de filtro da coluna (estilo Google Sheets)
       const filterBtn = createElement("button", "col-filter-btn", "▼");
       filterBtn.type = "button";
-      filterBtn.title = "Filtrar por " + field;
-      filterBtn.setAttribute("aria-label", "Filtrar por " + field);
+      filterBtn.title = "Filtrar por " + getColumnLabel(field);
+      filterBtn.setAttribute("aria-label", "Filtrar por " + getColumnLabel(field));
       if (state.columnFilters.has(field)) {
         filterBtn.classList.add("is-active");
         filterBtn.textContent = "✓";
@@ -611,6 +694,47 @@
       content.appendChild(filterBtn);
       th.appendChild(content);
 
+      // Drag and drop para reordenar colunas (Desktop)
+      th.addEventListener("dragstart", (e) => {
+        if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input")) {
+          e.preventDefault();
+          return;
+        }
+        dragSrcField = field;
+        th.classList.add("is-dragging-col");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", field);
+      });
+
+      th.addEventListener("dragover", (e) => {
+        if (!dragSrcField || dragSrcField === field) return;
+        e.preventDefault();
+        const rect = th.getBoundingClientRect();
+        const isRight = (e.clientX - rect.left) > (rect.width / 2);
+        th.classList.toggle("drag-over-right", isRight);
+        th.classList.toggle("drag-over-left", !isRight);
+      });
+
+      th.addEventListener("dragleave", () => {
+        th.classList.remove("drag-over-left", "drag-over-right");
+      });
+
+      th.addEventListener("drop", (e) => {
+        e.preventDefault();
+        th.classList.remove("drag-over-left", "drag-over-right");
+        if (!dragSrcField || dragSrcField === field) return;
+        const rect = th.getBoundingClientRect();
+        const placeAfter = (e.clientX - rect.left) > (rect.width / 2);
+        reorderColumn(dragSrcField, field, placeAfter);
+      });
+
+      th.addEventListener("dragend", () => {
+        dragSrcField = null;
+        tableHead.querySelectorAll("th").forEach((el) => {
+          el.classList.remove("is-dragging-col", "drag-over-left", "drag-over-right");
+        });
+      });
+
       // Setup drag resizer
       setupColumnResize(th, field);
 
@@ -621,7 +745,7 @@
   }
 
   function renderTable() {
-    const columns = FIELDS.filter((field) => state.visibleColumns.has(field));
+    const columns = state.columnOrder.filter((field) => state.visibleColumns.has(field));
     renderTableHead(columns);
 
     const matched = matchingRecords();
@@ -1017,6 +1141,10 @@
     });
     total += state.shortcutDeletes.size;
 
+    // + 1 por cada coluna renomeada e + 1 se a ordem das colunas mudou
+    total += Object.keys(state.pendingColumnRenames).length;
+    if (state.columnOrderChanged) total += 1;
+
     return total;
   }
 
@@ -1054,6 +1182,9 @@
     state.expanded.clear();
     state.shortcutDeletes.clear();
     state.editingCell = null;
+    state.pendingColumnRenames = {};
+    state.columnOrder = state.originalColumnOrder.slice();
+    state.columnOrderChanged = false;
     state.shortcuts = state.shortcuts
       .filter((s) => !s.isNew)
       .map((s) => ({
@@ -1125,7 +1256,9 @@
       action: "save",
       updates,
       newRecords,
-      shortcuts: shortcutsPayload
+      shortcuts: shortcutsPayload,
+      columnRenames: Object.keys(state.pendingColumnRenames).length ? state.pendingColumnRenames : undefined,
+      columnOrder: state.columnOrderChanged ? state.columnOrder : undefined
     })
       .then((response) => {
         if (!response || !response.ok) {
@@ -1134,6 +1267,8 @@
         state.pending.clear();
         state.creates.clear();
         state.shortcutDeletes.clear();
+        state.pendingColumnRenames = {};
+        state.columnOrderChanged = false;
         return loadRecords();
       })
       .then(() => notify("Alterações salvas na planilha."))
@@ -1205,6 +1340,28 @@
         state.pending.clear();
         state.creates.clear();
         state.loaded = true;
+
+        // Process column order and labels from sheet
+        if (Array.isArray(response.columns) && response.columns.length > 0) {
+          const order = [];
+          const labels = {};
+          response.columns.forEach((col) => {
+            if (col && col.canonical && FIELDS.includes(col.canonical)) {
+              order.push(col.canonical);
+              labels[col.canonical] = col.label || col.canonical;
+            }
+          });
+          FIELDS.forEach((f) => {
+            if (!order.includes(f)) order.push(f);
+            if (!labels[f]) labels[f] = f;
+          });
+          state.columnOrder = order;
+          state.originalColumnOrder = order.slice();
+          state.columnLabels = labels;
+          state.originalColumnLabels = Object.assign({}, labels);
+          state.pendingColumnRenames = {};
+          state.columnOrderChanged = false;
+        }
 
         // Process shortcuts with robust parsing & active fallback
         if (Array.isArray(response.shortcuts) && response.shortcuts.length > 0) {
@@ -1897,6 +2054,19 @@
     document.addEventListener("touchstart", (e) => {
       if (!rowContextMenu.hidden && !rowContextMenu.contains(e.target)) {
         closeContextMenu();
+      }
+    }, { passive: true });
+
+    // Manter thead sempre congelado no topo da viewport durante rolagem vertical da página
+    window.addEventListener("scroll", () => {
+      const thead = tableHead.parentElement;
+      const tableEl = thead ? thead.parentElement : null;
+      if (!thead || !tableEl) return;
+      const rect = tableEl.getBoundingClientRect();
+      if (rect.top < 0 && rect.bottom > thead.offsetHeight) {
+        thead.style.transform = `translateY(${Math.abs(rect.top)}px)`;
+      } else {
+        thead.style.transform = "";
       }
     }, { passive: true });
 
