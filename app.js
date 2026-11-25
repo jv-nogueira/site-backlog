@@ -13,7 +13,7 @@
   ];
   const DEFAULT_COLUMNS = new Set(["Categoria", "Descrição", "Recebedor", "Preço total"]);
   const STATUSES = ["Aberto", "Resolvido", "Cancelado"];
-  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxvycYTRV4DUA7skOF-1gVcJfQC8QqEkssM1v80dMsk06FplrgjyLVPkXTyzgZjW6Pf/exec";
+  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzhW9Mfrvi2Jbo6NS6mrhILJuCbXRQLp272Zr_UItZtijz2nCFTDLSPt8a94K-hjQSf/exec";
   const COLUMN_KEY = "workspace-database-visible-columns";
   const THEME_KEY = "workspace-database-theme";
   const BLANK_VALUE_KEY = "__BLANK_VALUE__";
@@ -60,7 +60,8 @@
     shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
     shortcutDeletes: new Set(), // Set of rowNumbers to delete from sheet
     activeEditingShortcut: null,
-    shortcutSelectedCategories: new Set()
+    shortcutSelectedCategories: new Set(),
+    activeShortcutId: null
   };
 
   const byId = (id) => document.getElementById(id);
@@ -289,9 +290,9 @@
     function onPointerMove(e) {
       const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       const diff = clientX - startX;
-      const newWidth = Math.max(24, startWidth + diff);
+      const newWidth = Math.max(4, startWidth + diff);
       th.style.width = newWidth + "px";
-      th.style.minWidth = newWidth + "px";
+      th.style.minWidth = "";   // sem trava de mínimo por CSS inline
       state.columnWidths[field] = newWidth;
     }
 
@@ -631,7 +632,7 @@
 
       if (state.columnWidths[field]) {
         th.style.width = state.columnWidths[field] + "px";
-        th.style.minWidth = state.columnWidths[field] + "px";
+        th.style.minWidth = "";  // sem trava; deixa CSS da tabela cuidar do mínimo
       }
 
       const content = createElement("div", "th-content");
@@ -1352,6 +1353,10 @@
             if (col && col.canonical && FIELDS.includes(col.canonical)) {
               order.push(col.canonical);
               labels[col.canonical] = col.label || col.canonical;
+              // Aplica largura da planilha somente se ainda não foi redimensionada pelo usuário
+              if (col.width && col.width > 0 && !state.columnWidths[col.canonical]) {
+                state.columnWidths[col.canonical] = col.width;
+              }
             }
           });
           FIELDS.forEach((f) => {
@@ -1532,10 +1537,11 @@
       const group = createElement("div", "shortcut-pill-group");
       if (sc.isNew || sc.isModified) group.classList.add("is-pending-shortcut");
 
-      const applyBtn = createElement("button", "shortcut-apply-btn", sc.fields["Nome-Button"]);
-      applyBtn.type = "button";
-      applyBtn.title = "Aplicar filtros deste atalho";
-      applyBtn.addEventListener("click", () => applyShortcut(sc));
+       const applyBtn = createElement("button", "shortcut-apply-btn", sc.fields["Nome-Button"]);
+       applyBtn.type = "button";
+       applyBtn.title = "Aplicar filtros deste atalho";
+       if (state.activeShortcutId === sc.id) applyBtn.classList.add("is-active");
+       applyBtn.addEventListener("click", () => applyShortcut(sc));
 
       const editBtn = createElement("button", "shortcut-edit-btn", "✎");
       editBtn.type = "button";
@@ -1628,8 +1634,10 @@
     }
     // Quando Colunas está vazio, NÃO altera as colunas visíveis atuais
 
+    state.activeShortcutId = shortcut.id;
     state.expanded.clear();
     renderTable();
+    renderShortcutsBar();
     notify(`Atalho "${f["Nome-Button"]}" aplicado.`);
   }
 
@@ -1884,22 +1892,26 @@
     byId("save-changes").addEventListener("click", checkAndConfirmSave);
     byId("cancel-changes").addEventListener("click", cancelAllChanges);
     byId("add-task").addEventListener("click", () => dialogOpen(byId("task-dialog")));
-    byId("search-input").addEventListener("input", renderTable);
-    document.querySelectorAll('input[name="status-filter"]').forEach((input) => input.addEventListener("change", renderTable));
+    byId("search-input").addEventListener("input", () => { state.activeShortcutId = null; renderShortcutsBar(); renderTable(); });
+    document.querySelectorAll('input[name="status-filter"]').forEach((input) => input.addEventListener("change", () => { state.activeShortcutId = null; renderShortcutsBar(); renderTable(); }));
     const projTrueCb = byId("filter-projects-true");
     const projFalseCb = byId("filter-projects-false");
     const handleProjectFilterChange = (changedCb) => {
-      if (!projTrueCb.checked && !projFalseCb.checked) {
-        changedCb.checked = true;
-        notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
-        return;
-      }
-      renderTable();
+       if (!projTrueCb.checked && !projFalseCb.checked) {
+         changedCb.checked = true;
+         notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
+         return;
+       }
+       state.activeShortcutId = null;
+       renderShortcutsBar();
+       renderTable();
     };
     projTrueCb.addEventListener("change", () => handleProjectFilterChange(projTrueCb));
     projFalseCb.addEventListener("change", () => handleProjectFilterChange(projFalseCb));
     byId("group-categories").addEventListener("change", () => {
       state.expanded.clear();
+      state.activeShortcutId = null;
+      renderShortcutsBar();
       renderTable();
     });
 
@@ -1907,6 +1919,8 @@
       state.columnFilters.clear();
       state.sortField = null;
       state.sortDirection = null;
+      state.activeShortcutId = null;
+      renderShortcutsBar();
       renderTable();
       notify("Filtros de coluna e ordenações foram limpos.");
     });

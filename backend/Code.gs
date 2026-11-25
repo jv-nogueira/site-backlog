@@ -98,11 +98,14 @@ function getOrderedColumns_(headers, colMap) {
   Object.keys(colMap).forEach(function (canonical) {
     reverseMap[colMap[canonical]] = canonical;
   });
+  const sheet = getDatabaseSheet_();
   headers.forEach(function (h, idx) {
     const colNum = idx + 1;
     const canonical = reverseMap[colNum];
     if (canonical) {
-      result.push({ canonical: canonical, label: String(h || canonical).trim() });
+      var width = 0;
+      try { width = sheet.getColumnWidth(colNum); } catch (e) { width = 0; }
+      result.push({ canonical: canonical, label: String(h || canonical).trim(), width: width || 0 });
     }
   });
   return result;
@@ -162,12 +165,24 @@ function readShortcuts_() {
     const rawActive = getColVal(row, "Ativar-Atalho");
     const active = isTruthyShortcutActive_(rawActive);
 
+    // Lê "Apenas-Projetos" preservando FALSE booleano (não usar || "")
+    var rawAP = getColVal(row, "Apenas-Projetos");
+    var apStr;
+    if (rawAP === true || rawAP === false) {
+      apStr = rawAP ? "TRUE" : "FALSE";
+    } else {
+      apStr = String(rawAP == null ? "" : rawAP).trim().toUpperCase();
+      // Normaliza variantes em português
+      if (apStr === "VERDADEIRO") apStr = "TRUE";
+      else if (apStr === "FALSO") apStr = "FALSE";
+    }
+
     shortcuts.push({
       rowNumber: i + 1,
       fields: {
         "Nome-Button": shortcutName,
         "Categorias-Filtradas": String(getColVal(row, "Categorias-Filtradas") || "").trim(),
-        "Apenas-Projetos": String(getColVal(row, "Apenas-Projetos") || "").trim(),
+        "Apenas-Projetos": apStr,
         "Status-Selecionados": String(getColVal(row, "Status-Selecionados") || "").trim(),
         "Categorias-Duplicadas": String(getColVal(row, "Categorias-Duplicadas") || "").trim(),
         "Colunas": String(getColVal(row, "Colunas") || "").trim(),

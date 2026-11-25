@@ -395,31 +395,9 @@ th:last-child {
   border-right: 0;
 }
 
-/* Primeira coluna congelada (Sticky à esquerda) */
-th.is-first-col {
-  position: sticky;
-  left: 0;
-  top: 0;
-  z-index: 8;
-  background: var(--table-head-bg);
-}
-td.is-first-col {
-  position: sticky;
-  left: 0;
-  z-index: 5;
+/* Primeira coluna sem congelamento (rola normalmente) */
+th.is-first-col, td.is-first-col {
   background: var(--surface);
-}
-tbody tr:hover td.is-first-col {
-  background: var(--surface-hover);
-}
-tbody tr.pending-row td.is-first-col {
-  background: var(--surface-hover);
-}
-tbody tr.selected-row td.is-first-col {
-  background: var(--accent-soft) !important;
-}
-tbody tr.context-focus-row td.is-first-col {
-  background: var(--accent-soft) !important;
 }
 
 .th-content {
@@ -501,7 +479,7 @@ td {
   background: var(--surface);
   overflow: hidden;
   user-select: none;
-  min-width: 24px;
+  /* sem min-width: o redimensionamento é livre; o mínimo técnico vem do próprio conteúdo */
 }
 td:last-child {
   border-right: 0;
@@ -532,9 +510,14 @@ tbody tr.context-focus-row td {
   color: var(--input-color);
   border-radius: 4px;
   cursor: default;
-  white-space: nowrap;
+  /* Quebra o texto dentro da célula quando a coluna estiver estreita,
+     sem deixar o conteúdo vazar horizontalmente.
+     A altura fixa de 26px garante que a linha permaneça compacta:
+     linhas extras ficam ocultas (overflow: hidden) até o usuário expandir. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   overflow: hidden;
-  text-overflow: ellipsis;
   box-sizing: border-box;
 }
 .cell-readonly.is-expanded {
@@ -544,6 +527,7 @@ tbody tr.context-focus-row td {
   padding: 4px 18px 4px 4px;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .cell-readonly:hover {
   background: rgba(71, 104, 223, 0.05);
