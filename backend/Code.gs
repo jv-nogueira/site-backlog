@@ -72,6 +72,23 @@ function readRecords_() {
   return records;
 }
 
+function normalizeHeaderKey_(header) {
+  return String(header || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isTruthyShortcutActive_(value) {
+  if (value === "" || value == null) return true;
+  if (value === true) return true;
+  if (value === false) return false;
+  const str = String(value).trim().toUpperCase();
+  return str === "TRUE" || str === "VERDADEIRO" || str === "1" || str === "SIM";
+}
+
 function readShortcuts_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHORTCUTS_SHEET_NAME);
@@ -84,27 +101,40 @@ function readShortcuts_() {
   const headers = values[0];
   const colMap = {};
   headers.forEach((h, idx) => {
-    colMap[String(h).trim()] = idx;
+    const cleanHeader = String(h || "").trim();
+    if (cleanHeader) {
+      colMap[cleanHeader] = idx;
+      colMap[normalizeHeaderKey_(cleanHeader)] = idx;
+    }
   });
 
-  const shortcuts = [];
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    const name = colMap["Nome-Button"] != null ? String(row[colMap["Nome-Button"]] || "").trim() : "";
-    if (!name) continue;
+  function getColVal(row, canonicalName) {
+    const norm = normalizeHeaderKey_(canonicalName);
+    const idx = colMap[canonicalName] != null ? colMap[canonicalName] : colMap[norm];
+    if (idx != null && idx < row.length) {
+      return row[idx];
+    }
+    return "";
+  }
 
-    const rawActive = colMap["Ativar-Atalho"] != null ? row[colMap["Ativar-Atalho"]] : true;
-    const active = rawActive === "" ? true : (rawActive === true || String(rawActive).toUpperCase() === "TRUE" || String(rawActive).toUpperCase() === "VERDADEIRO");
+  const shortcuts = [];
+  for (let i = 1; i < values.length; i += 1) {
+    const row = values[i];
+    const shortcutName = String(getColVal(row, "Nome-Button") || "").trim();
+    if (!shortcutName) continue;
+
+    const rawActive = getColVal(row, "Ativar-Atalho");
+    const active = isTruthyShortcutActive_(rawActive);
 
     shortcuts.push({
       rowNumber: i + 1,
       fields: {
-        "Nome-Button": name,
-        "Categorias-Filtradas": colMap["Categorias-Filtradas"] != null ? String(row[colMap["Categorias-Filtradas"]] || "") : "",
-        "Apenas-Projetos": colMap["Apenas-Projetos"] != null ? String(row[colMap["Apenas-Projetos"]] || "") : "",
-        "Status-Selecionados": colMap["Status-Selecionados"] != null ? String(row[colMap["Status-Selecionados"]] || "") : "",
-        "Categorias-Duplicadas": colMap["Categorias-Duplicadas"] != null ? String(row[colMap["Categorias-Duplicadas"]] || "") : "",
-        "Colunas": colMap["Colunas"] != null ? String(row[colMap["Colunas"]] || "") : "",
+        "Nome-Button": shortcutName,
+        "Categorias-Filtradas": String(getColVal(row, "Categorias-Filtradas") || "").trim(),
+        "Apenas-Projetos": String(getColVal(row, "Apenas-Projetos") || "").trim(),
+        "Status-Selecionados": String(getColVal(row, "Status-Selecionados") || "").trim(),
+        "Categorias-Duplicadas": String(getColVal(row, "Categorias-Duplicadas") || "").trim(),
+        "Colunas": String(getColVal(row, "Colunas") || "").trim(),
         "Ativar-Atalho": active
       }
     });
@@ -209,16 +239,26 @@ function saveShortcuts_(shortcutOps) {
   const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const colMap = {};
   headers.forEach((h, idx) => {
-    colMap[String(h).trim()] = idx + 1;
+    const clean = String(h || "").trim();
+    if (clean) {
+      colMap[clean] = idx + 1;
+      colMap[normalizeHeaderKey_(clean)] = idx + 1;
+    }
   });
 
   SHORTCUT_HEADERS.forEach((h) => {
-    if (!colMap[h]) {
+    const norm = normalizeHeaderKey_(h);
+    if (!colMap[h] && !colMap[norm]) {
       lastColumn += 1;
       sheet.getRange(1, lastColumn).setValue(h);
       colMap[h] = lastColumn;
+      colMap[norm] = lastColumn;
     }
   });
+
+  function resolveShortcutCol(key) {
+    return colMap[key] || colMap[normalizeHeaderKey_(key)];
+  }
 
   // Handle deletions first (sorted descending by rowNumber)
   const deletes = Array.isArray(shortcutOps.deletes) ? shortcutOps.deletes : [];
@@ -240,8 +280,13 @@ function saveShortcuts_(shortcutOps) {
     if (Number.isInteger(r) && r >= 2 && r <= sheet.getLastRow()) {
       const f = up.fields || {};
       Object.keys(f).forEach((key) => {
-        if (colMap[key]) {
-          sheet.getRange(r, colMap[key]).setValue(f[key]);
+        const colIdx = resolveShortcutCol(key);
+        if (colIdx) {
+          let val = f[key];
+          if (key === "Ativar-Atalho" || normalizeHeaderKey_(key) === "ativar-atalho") {
+            val = isTruthyShortcutActive_(val) ? "TRUE" : "FALSE";
+          }
+          sheet.getRange(r, colIdx).setValue(val);
         }
       });
     }
@@ -254,8 +299,13 @@ function saveShortcuts_(shortcutOps) {
       const f = item.fields || item;
       const row = new Array(lastColumn).fill("");
       SHORTCUT_HEADERS.forEach((key) => {
-        if (colMap[key]) {
-          row[colMap[key] - 1] = f[key] != null ? f[key] : "";
+        const colIdx = resolveShortcutCol(key);
+        if (colIdx) {
+          let val = f[key] != null ? f[key] : "";
+          if (key === "Ativar-Atalho") {
+            val = isTruthyShortcutActive_(val) ? "TRUE" : "FALSE";
+          }
+          row[colIdx - 1] = val;
         }
       });
       return row;
@@ -274,14 +324,14 @@ function getDatabaseSheet_() {
 function getColumnMap_(headers) {
   const map = {};
   headers.forEach(function (header, index) {
-    const name = String(header);
-    if (REQUIRED_HEADERS.indexOf(name) !== -1 && map[name]) {
-      throw new Error('Cabeçalho obrigatório duplicado: "' + name + '".');
+    const colName = String(header);
+    if (REQUIRED_HEADERS.indexOf(colName) !== -1 && map[colName]) {
+      throw new Error('Cabeçalho obrigatório duplicado: "' + colName + '".');
     }
-    if (name) map[name] = index + 1;
+    if (colName) map[colName] = index + 1;
   });
-  const missing = REQUIRED_HEADERS.filter(function (name) {
-    return !map[name];
+  const missing = REQUIRED_HEADERS.filter(function (colName) {
+    return !map[colName];
   });
   if (missing.length) throw new Error("Cabeçalhos obrigatórios ausentes: " + missing.join(", "));
   return map;
@@ -289,17 +339,17 @@ function getColumnMap_(headers) {
 
 function rowToFields_(row, columns) {
   const fields = {};
-  REQUIRED_HEADERS.forEach(function (name) {
-    const value = row[columns[name] - 1];
-    if (name === "Projeto") {
-      fields[name] = value === true || String(value).toLocaleLowerCase() === "true" ||
+  REQUIRED_HEADERS.forEach(function (fieldName) {
+    const value = row[columns[fieldName] - 1];
+    if (fieldName === "Projeto") {
+      fields[fieldName] = value === true || String(value).toLocaleLowerCase() === "true" ||
         String(value).toLocaleLowerCase() === "verdadeiro";
-    } else if (name === "Status") {
-      fields[name] = normalizeStatus_(value);
-    } else if (name === "Data conclusão" && value instanceof Date) {
-      fields[name] = Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    } else if (fieldName === "Status") {
+      fields[fieldName] = normalizeStatus_(value);
+    } else if (fieldName === "Data conclusão" && value instanceof Date) {
+      fields[fieldName] = Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
     } else {
-      fields[name] = value == null ? "" : value;
+      fields[fieldName] = value == null ? "" : value;
     }
   });
   return fields;
@@ -311,10 +361,10 @@ function normalizeStatus_(value) {
 }
 
 function fieldSignature_(fields) {
-  return JSON.stringify(REQUIRED_HEADERS.map(function (name) {
-    let value = fields[name];
-    if (name === "Status") value = normalizeStatus_(value);
-    if (name === "Projeto") value = value === true || String(value).toLocaleLowerCase() === "true" ||
+  return JSON.stringify(REQUIRED_HEADERS.map(function (fieldName) {
+    let value = fields[fieldName];
+    if (fieldName === "Status") value = normalizeStatus_(value);
+    if (fieldName === "Projeto") value = value === true || String(value).toLocaleLowerCase() === "true" ||
       String(value).toLocaleLowerCase() === "verdadeiro";
     if (value == null) value = "";
     return value instanceof Date

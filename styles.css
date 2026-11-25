@@ -106,7 +106,7 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
 .heading-actions { display: flex; gap: 9px; align-items: center; }
 
 /* Buttons */
-.button { min-height: 39px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; font-weight: 600; transition: background .15s, border-color .15s, transform .15s, box-shadow .15s; }
+.button { min-height: 39px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; transition: background .15s, border-color .15s, transform .15s, box-shadow .15s; }
 .button:active { transform: translateY(1px); }
 .button-primary { background: var(--accent); color: #fff; box-shadow: 0 3px 8px rgba(71, 104, 223, 0.25); }
 .button-primary:hover:not(:disabled) { background: var(--accent-dark); }
@@ -223,6 +223,8 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   border-color: var(--amber-border);
   background: var(--amber-soft);
 }
+
+/* Atalhos inativos centralizado */
 .inactive-shortcuts-details {
   position: relative;
   display: inline-block;
@@ -230,13 +232,21 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
 .inactive-shortcuts-details summary {
   list-style: none;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 5px;
+  padding: 0 11px;
+  min-height: 33px;
+  line-height: 1;
 }
 .inactive-shortcuts-details summary::-webkit-details-marker {
   display: none;
 }
 .inactive-shortcuts-list {
   position: absolute;
-  top: 36px;
+  top: 38px;
   right: 0;
   z-index: 25;
   min-width: 200px;
@@ -340,11 +350,9 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .stat-pill.stat-projects strong { color: var(--accent); }
 .edit-hint { margin: 0; color: var(--muted); font-size: 11px; }
 
-/* Sticky Header and Sticky First Column */
+/* Rolagem nativa: sem max-height forçado na base de dados */
 .table-scroll {
   overflow-x: auto;
-  overflow-y: auto;
-  max-height: 70vh;
   position: relative;
   border-radius: 0 0 12px 12px;
 }
@@ -400,6 +408,9 @@ tbody tr.pending-row td.is-first-col {
   background: var(--surface-hover);
 }
 tbody tr.selected-row td.is-first-col {
+  background: var(--accent-soft) !important;
+}
+tbody tr.context-focus-row td.is-first-col {
   background: var(--accent-soft) !important;
 }
 
@@ -479,78 +490,102 @@ td {
   border-top: 1px solid var(--table-border);
   vertical-align: middle;
   background: var(--surface);
-  overflow: hidden; /* Conteúdo rígido sem scroll interno */
+  overflow: hidden;
+  user-select: none;
 }
 tbody tr:hover { background: var(--surface-hover); }
 tbody tr.selected-row {
   background: var(--accent-soft) !important;
-  outline: 1px solid var(--accent);
 }
 tbody tr.selected-row td {
   background: var(--accent-soft) !important;
 }
+tbody tr.context-focus-row {
+  background: var(--accent-soft) !important;
+  outline: 1.5px solid var(--accent);
+}
+tbody tr.context-focus-row td {
+  background: var(--accent-soft) !important;
+}
 
-/* Células rígidas e sem scroll de texto interno */
-td input:not([type="checkbox"]), td select, td textarea {
+/* Modo Leitura / Rígido (Padrão) vs Modo Edição (após duplo clique) */
+.cell-readonly {
+  display: flex;
+  align-items: center;
+  position: relative;
+  min-height: 31px;
+  padding: 5px 6px;
+  font-size: 11px;
+  color: var(--input-color);
+  line-height: 1.4;
+  border-radius: 4px;
+  cursor: default;
+  word-break: break-word;
+  white-space: pre-wrap;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.cell-readonly:hover {
+  background: rgba(71, 104, 223, 0.05);
+}
+.cell-readonly.is-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Alça / Botão de arraste para expandir visualização de texto longo */
+.cell-expand-wrap {
+  position: relative;
+  width: 100%;
+}
+.cell-expand-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: se-resize;
+  opacity: 0.35;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  user-select: none;
+  transition: opacity .15s;
+}
+.cell-expand-handle:hover,
+.cell-expand-handle.is-dragging {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Células em modo de edição */
+td.is-editing {
+  user-select: auto;
+}
+td.is-editing input:not([type="checkbox"]),
+td.is-editing select,
+td.is-editing textarea {
   width: 100%;
   min-width: 90px;
   min-height: 31px;
   padding: 6px 7px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-focus);
   border-radius: 5px;
   outline: none;
-  background: transparent;
-  color: var(--input-color);
-  font-size: 11px;
-  overflow: hidden;
-  resize: none;
-  transition: border-color .15s, background .15s;
-}
-td input:focus, td select:focus, td textarea:focus {
-  border-color: var(--border-focus);
   background: var(--input-bg);
-  box-shadow: 0 0 0 2px var(--shadow-focus);
-}
-td input[type="checkbox"] { display: block; margin: auto; }
-td select { min-width: 104px; cursor: pointer; }
-
-/* Célula de Descrição - Rígida sem barra de rolagem */
-.desc-cell-wrap {
-  position: relative;
-  display: block;
-  width: 100%;
-  overflow: hidden;
-}
-.desc-textarea {
-  display: block;
-  width: 100%;
-  min-height: 32px;
-  max-height: 80px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
   color: var(--input-color);
   font-size: 11px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden !important;
-  resize: none !important;
+  box-shadow: 0 0 0 2px var(--shadow-focus);
   box-sizing: border-box;
 }
-.desc-textarea:hover {
-  border-color: var(--line);
-}
-.desc-textarea:focus {
-  border-color: var(--border-focus);
-  background: var(--input-bg);
-  box-shadow: 0 0 0 2px var(--shadow-focus);
+td.is-editing textarea {
+  resize: vertical;
 }
 
 /* Category cell */
 .category-cell { display: flex; align-items: center; gap: 4px; min-width: 140px; }
-.category-cell input { min-width: 95px !important; }
 .expand-button { flex: 0 0 23px; width: 23px; height: 23px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; }
 .expand-button:hover { border-color: var(--accent); color: var(--accent); }
 .subtask-row td:first-child { padding-left: 28px; }

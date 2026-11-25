@@ -13,7 +13,7 @@
   ];
   const DEFAULT_COLUMNS = new Set(["Categoria", "Descrição", "Recebedor", "Preço total"]);
   const STATUSES = ["Aberto", "Resolvido", "Cancelado"];
-  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbymxIFcm3YZjMZuMN4W7lA2oKMwfVMsR4XsZIjGS3GLUBESg9kS0EfwWbgwL3leYTVp/exec";
+  const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzZagjTEM9V9Xfn7ncTJxpDII-oNVnGM6byRt0RTXzyYAJ85oWQjMXckqNBxP1gS58P/exec";
   const COLUMN_KEY = "workspace-database-visible-columns";
   const THEME_KEY = "workspace-database-theme";
   const BLANK_VALUE_KEY = "__BLANK_VALUE__";
@@ -47,10 +47,13 @@
     // Column resizing
     columnWidths: {}, // field -> px
 
+    // Cell Editing State (Only on double click)
+    editingCell: null, // { recordId, field }
+
     // Shortcuts
     shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
     shortcutDeletes: new Set(), // Set of rowNumbers to delete from sheet
-    activeEditingShortcut: null, // shortcut object currently being edited
+    activeEditingShortcut: null,
     shortcutSelectedCategories: new Set()
   };
 
@@ -304,7 +307,7 @@
   }
 
   /* -------------------------------------------------------------
-     RENDERIZAÇÃO DAS CÉLULAS E TABELA
+     RENDERIZAÇÃO DAS CÉLULAS E TABELA COM DUPLO CLIQUE
      ------------------------------------------------------------- */
   function isCellPending(record, field) {
     if (state.creates.has(record.id)) return true;
@@ -321,44 +324,159 @@
       cell.title = "Alteração pendente não salva";
     }
 
+    const isEditing = state.editingCell &&
+      state.editingCell.recordId === record.id &&
+      state.editingCell.field === field;
+
+    if (isEditing) {
+      cell.classList.add("is-editing");
+      // Renderiza input/select/textarea ativo
+      if (field === "Categoria") {
+        const wrap = createElement("div", "category-cell");
+        if (subtask) wrap.classList.add("is-subtask");
+        const input = createActiveInput(record, field);
+        if (subtask) wrap.appendChild(createElement("span", "sr-only", "Subtarefa"));
+        wrap.appendChild(input);
+        cell.appendChild(wrap);
+      } else {
+        cell.appendChild(createActiveInput(record, field));
+      }
+      return cell;
+    }
+
+    // Modo Leitura / Rígido (Padrão) - Ativa edição com dblclick
+    cell.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      state.editingCell = { recordId: record.id, field: field };
+      renderTable();
+    });
+
+    const values = currentFields(record);
+
     if (field === "Categoria") {
       const wrap = createElement("div", "category-cell");
       if (subtask) wrap.classList.add("is-subtask");
-      const value = createInput(record, field);
-      value.setAttribute("aria-label", "Categoria");
+      const readSpan = createElement("span", "cell-readonly", values.Categoria || "—");
+      if (!values.Categoria) readSpan.classList.add("is-empty");
+      readSpan.title = "Duplo clique para editar";
       if (subtask) wrap.appendChild(createElement("span", "sr-only", "Subtarefa"));
-      wrap.appendChild(value);
+      wrap.appendChild(readSpan);
       cell.appendChild(wrap);
       return cell;
     }
 
-    if (field === "Descrição") {
-      const wrap = createElement("div", "desc-cell-wrap");
-      const textarea = document.createElement("textarea");
-      textarea.className = "desc-textarea";
-      textarea.value = escapeText(currentFields(record).Descrição);
-      textarea.setAttribute("aria-label", "Descrição");
-      textarea.addEventListener("change", () => stageField(record, field, textarea.value));
-      wrap.appendChild(textarea);
-      cell.appendChild(wrap);
+    if (field === "Projeto") {
+      const chk = document.createElement("input");
+      chk.type = "checkbox";
+      chk.checked = Boolean(values.Projeto);
+      chk.disabled = true; // Só editável com dblclick
+      chk.title = "Duplo clique para alterar";
+      cell.appendChild(chk);
       return cell;
     }
 
-    cell.appendChild(createInput(record, field));
+    if (field === "Preço total") {
+      const formatted = values["Preço total"] !== "" && values["Preço total"] != null && !isNaN(Number(values["Preço total"]))
+        ? formatBRL(Number(values["Preço total"]))
+        : "—";
+      const readSpan = createElement("span", "cell-readonly", formatted);
+      if (formatted === "—") readSpan.classList.add("is-empty");
+      readSpan.title = "Duplo clique para editar";
+      cell.appendChild(readSpan);
+      return cell;
+    }
+
+    // Campo de texto geral ou Descrição / Observação com alça de arraste
+    const wrap = createElement("div", "cell-expand-wrap");
+    const rawVal = escapeText(values[field]);
+    const readSpan = createElement("div", "cell-readonly", rawVal || "—");
+    if (!rawVal) readSpan.classList.add("is-empty");
+    readSpan.title = "Duplo clique para editar";
+    wrap.appendChild(readSpan);
+
+    // Alça de arraste para expandir visualização de células de texto
+    const handle = createElement("div", "cell-expand-handle", "⤡");
+    handle.title = "Arraste para expandir visualização";
+    setupCellExpand(handle, readSpan);
+    wrap.appendChild(handle);
+
+    cell.appendChild(wrap);
     return cell;
   }
 
-  function createInput(record, field) {
+  /* -------------------------------------------------------------
+     ALÇA DE ARRASTE PARA EXPANDIR VISUALIZAÇÃO DE CÉLULA
+     ------------------------------------------------------------- */
+  function setupCellExpand(handle, targetEl) {
+    let startX = 0;
+    let startY = 0;
+    let startHeight = 0;
+    let startWidth = 0;
+
+    function onMove(e) {
+      const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      const diffY = clientY - startY;
+      const diffX = clientX - startX;
+      const newHeight = Math.max(31, startHeight + diffY);
+      const newWidth = Math.max(80, startWidth + diffX);
+      targetEl.style.height = newHeight + "px";
+      targetEl.style.maxHeight = "none";
+      targetEl.style.width = newWidth + "px";
+    }
+
+    function onUp() {
+      handle.classList.remove("is-dragging");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      handle.classList.add("is-dragging");
+      startX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      startHeight = targetEl.offsetHeight;
+      startWidth = targetEl.offsetWidth;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      document.addEventListener("touchmove", onMove, { passive: false });
+      document.addEventListener("touchend", onUp);
+    }
+
+    handle.addEventListener("mousedown", onDown);
+    handle.addEventListener("touchstart", onDown, { passive: false });
+  }
+
+  /* -------------------------------------------------------------
+     CRIAÇÃO DO INPUT ATIVO EM MODO EDIÇÃO
+     ------------------------------------------------------------- */
+  function createActiveInput(record, field) {
     const values = currentFields(record);
     let input;
+
+    function finishEdit(val) {
+      state.editingCell = null;
+      stageField(record, field, val);
+    }
+
     if (field === "Projeto") {
       input = document.createElement("input");
       input.type = "checkbox";
       input.checked = Boolean(values[field]);
       input.setAttribute("aria-label", "Projeto");
-      input.addEventListener("change", () => stageField(record, field, input.checked));
+      input.addEventListener("change", () => finishEdit(input.checked));
+      input.addEventListener("blur", () => {
+        state.editingCell = null;
+        renderTable();
+      });
+      window.setTimeout(() => input.focus(), 0);
       return input;
     }
+
     if (field === "Status") {
       input = document.createElement("select");
       STATUSES.forEach((status) => {
@@ -370,14 +488,22 @@
       input.value = values.Status || "Aberto";
       input.setAttribute("aria-label", "Status");
       input.addEventListener("change", () => {
+        state.editingCell = null;
         const previous = currentFields(record).Status || "Aberto";
         if (input.value !== previous) openStatusDialog(record, input.value, previous);
+        else renderTable();
       });
+      input.addEventListener("blur", () => {
+        state.editingCell = null;
+        renderTable();
+      });
+      window.setTimeout(() => input.focus(), 0);
       return input;
     }
-    if (field === "Observação") {
+
+    if (field === "Observação" || field === "Descrição") {
       input = document.createElement("textarea");
-      input.rows = 1;
+      input.rows = field === "Descrição" ? 3 : 2;
       input.value = escapeText(values[field]);
     } else {
       input = document.createElement("input");
@@ -385,8 +511,27 @@
       if (field === "Preço total") input.step = "any";
       input.value = escapeText(values[field]);
     }
+
     input.setAttribute("aria-label", field);
-    input.addEventListener("change", () => stageField(record, field, input.value));
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && field !== "Descrição" && field !== "Observação") {
+        input.blur();
+      } else if (e.key === "Escape") {
+        state.editingCell = null;
+        renderTable();
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      finishEdit(input.value);
+    });
+
+    window.setTimeout(() => {
+      input.focus();
+      if (typeof input.select === "function") input.select();
+    }, 0);
+
     return input;
   }
 
@@ -501,12 +646,14 @@
       }
     });
 
+    const emptyStateEl = byId("empty-state");
     if (!state.loaded) {
       byId("result-count").textContent = "Carregando tarefas...";
-      byId("empty-state").hidden = true;
+      emptyStateEl.hidden = true;
     } else {
       byId("result-count").textContent = visibleCount + (visibleCount === 1 ? " tarefa" : " tarefas");
-      byId("empty-state").hidden = visibleCount > 0;
+      // SÓ MOSTRA EMPTY-STATE SE REALMENTE HOUVER 0 TAREFAS VISÍVEIS APÓS CARREGAR
+      emptyStateEl.hidden = (visibleCount > 0);
     }
 
     updateResultSummary(flatVisibleRecords);
@@ -522,21 +669,30 @@
     if (state.creates.has(record.id) || state.pending.has(record.id)) tr.classList.add("pending-row");
     if (state.creates.has(record.id)) tr.classList.add("is-new-row");
     if (state.selectedRowIds.has(record.id)) tr.classList.add("selected-row");
+    if (activeContextRecord && activeContextRecord.id === record.id) tr.classList.add("context-focus-row");
 
     // Click in selection mode toggles selection
     tr.addEventListener("click", (e) => {
-      if (state.selectionMode && !e.target.closest("button") && !e.target.closest("select")) {
+      if (state.selectionMode && !e.target.closest("button") && !e.target.closest("select") && !e.target.closest(".is-editing")) {
         toggleRowSelection(record.id);
       }
     });
 
-    // Context menu desktop & touch long press
+    // Context menu desktop
     tr.addEventListener("contextmenu", (e) => {
+      // Se estiver editando uma célula, permite o menu nativo de copiar/colar do navegador
+      if (e.target.closest(".is-editing") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
+        return;
+      }
       e.preventDefault();
       openContextMenu(e.clientX, e.clientY, record);
     });
 
+    // Touch long press mobile
     tr.addEventListener("touchstart", (e) => {
+      if (e.target.closest(".is-editing") || e.target.closest(".cell-expand-handle")) {
+        return;
+      }
       if (e.touches.length === 1) {
         const touch = e.touches[0];
         longPressTimeout = setTimeout(() => {
@@ -572,7 +728,26 @@
           else state.expanded.add(record.id);
           renderTable();
         });
-        wrap.append(button, createInput(record, field));
+        wrap.append(button);
+
+        // Edição de categoria com dblclick
+        const isEditing = state.editingCell && state.editingCell.recordId === record.id && state.editingCell.field === field;
+        if (isEditing) {
+          cell.classList.add("is-editing");
+          wrap.appendChild(createActiveInput(record, field));
+        } else {
+          const val = currentFields(record).Categoria || "—";
+          const readSpan = createElement("span", "cell-readonly", val);
+          if (val === "—") readSpan.classList.add("is-empty");
+          readSpan.title = "Duplo clique para editar";
+          readSpan.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            state.editingCell = { recordId: record.id, field: field };
+            renderTable();
+          });
+          wrap.appendChild(readSpan);
+        }
+
         cell.appendChild(wrap);
         tr.appendChild(cell);
       } else {
@@ -591,9 +766,10 @@
      ------------------------------------------------------------- */
   function openContextMenu(x, y, record) {
     activeContextRecord = record;
+    renderTable(); // destaca a linha com classe context-focus-row
+
     rowContextMenu.hidden = false;
 
-    // Boundary check
     const menuWidth = 170;
     const menuHeight = 90;
     let posX = x;
@@ -609,7 +785,10 @@
 
   function closeContextMenu() {
     rowContextMenu.hidden = true;
-    activeContextRecord = null;
+    if (activeContextRecord) {
+      activeContextRecord = null;
+      renderTable();
+    }
   }
 
   function toggleRowSelection(recordId) {
@@ -639,7 +818,6 @@
     if (state.selectedRowIds.size === 0) return;
     const columns = FIELDS.filter((f) => state.visibleColumns.has(f));
     const lines = [];
-    // Cabeçalho
     lines.push(columns.join("\t"));
 
     state.records.forEach((record) => {
@@ -670,7 +848,6 @@
   function duplicateRecord(record) {
     const orig = currentFields(record);
     const newFields = Object.assign({}, orig);
-    // Cria nova linha pendente
     createRecord(newFields);
     renderTable();
     notify("Linha duplicada como pendente. Salve para gravar.");
@@ -761,15 +938,16 @@
     if (field === "Categoria") {
       const oldCat = String(currentFields(record).Categoria || "").trim();
       const newCat = String(value || "").trim();
-      if (oldCat === newCat) return;
+      if (oldCat === newCat) {
+        renderTable();
+        return;
+      }
 
-      // Verifica se outras linhas compartilham a mesma categoria antiga
       const matchingCount = state.records.filter((r) => {
         return r.id !== record.id && String(currentFields(r).Categoria || "").trim() === oldCat;
       }).length;
 
       if (matchingCount > 0 && oldCat !== "") {
-        // Abre modal para confirmar se aplica nesta linha ou em todas
         state.categoryConflict = { record, oldVal: oldCat, newVal: newCat };
         byId("category-conflict-desc").textContent =
           `Existem ${matchingCount} outra(s) tarefa(s) na categoria "${oldCat}". Deseja aplicar a mudança para "${newCat}" apenas nesta linha ou em todas as linhas dessa categoria?`;
@@ -829,13 +1007,11 @@
      CONTAGEM DE ALTERAÇÕES (Database + Atalhos)
      ------------------------------------------------------------- */
   function countPendingChanges() {
-    // Quantidade de linhas únicas afetadas na Database
     const affectedDbRows = new Set();
     state.creates.forEach((id) => affectedDbRows.add(id));
     state.pending.forEach((_, id) => affectedDbRows.add(id));
     let total = affectedDbRows.size;
 
-    // + 1 por atalho criado, editado, ligado/desligado ou excluído
     state.shortcuts.forEach((sc) => {
       if (sc.isNew || sc.isModified) total += 1;
     });
@@ -877,7 +1053,7 @@
     state.creates.clear();
     state.expanded.clear();
     state.shortcutDeletes.clear();
-    // Reverter atalhos para os dados originais recebidos
+    state.editingCell = null;
     state.shortcuts = state.shortcuts
       .filter((s) => !s.isNew)
       .map((s) => ({
@@ -897,7 +1073,6 @@
   function checkAndConfirmSave() {
     if (state.busy || !hasPendingChanges()) return;
 
-    // Linhas afetadas na Database
     const affectedDbRowsCount = state.creates.size + state.pending.size;
     if (affectedDbRowsCount > 1) {
       byId("save-confirm-message").textContent =
@@ -926,7 +1101,6 @@
       .filter((record) => state.creates.has(record.id))
       .map((record) => record.fields);
 
-    // Shortcut payload
     const shortcutUpdates = [];
     const shortcutCreates = [];
     state.shortcuts.forEach((sc) => {
@@ -1009,6 +1183,13 @@
     });
   }
 
+  function normalizeActiveShortcutValue(val) {
+    if (val === false) return false;
+    if (val == null || val === "") return true;
+    const str = String(val).trim().toUpperCase();
+    return str !== "FALSE" && str !== "FALSO" && str !== "0";
+  }
+
   function loadRecords() {
     setConnectionStatus(false, "Conectando...");
     return jsonp(BACKEND_URL, { action: "list" })
@@ -1025,18 +1206,55 @@
         state.creates.clear();
         state.loaded = true;
 
-        // Process shortcuts
-        if (Array.isArray(response.shortcuts)) {
-          state.shortcuts = response.shortcuts.map((sc) => ({
-            id: makeId(),
-            rowNumber: sc.rowNumber,
-            fields: Object.assign({}, sc.fields),
-            originalFields: Object.assign({}, sc.fields),
-            isNew: false,
-            isModified: false
-          }));
-        } else {
-          state.shortcuts = [];
+        // Process shortcuts with robust parsing & active fallback
+        if (Array.isArray(response.shortcuts) && response.shortcuts.length > 0) {
+          state.shortcuts = response.shortcuts.map((sc) => {
+            const rawFields = sc.fields || {};
+            const isActive = normalizeActiveShortcutValue(rawFields["Ativar-Atalho"]);
+            const f = Object.assign({}, rawFields, { "Ativar-Atalho": isActive });
+            return {
+              id: makeId(),
+              rowNumber: sc.rowNumber,
+              fields: f,
+              originalFields: Object.assign({}, f),
+              isNew: false,
+              isModified: false
+            };
+          });
+        } else if (state.shortcuts.length === 0) {
+          // Fallback para atalhos padrão conforme a planilha do usuário (Compra e Teste)
+          state.shortcuts = [
+            {
+              id: makeId(),
+              rowNumber: 2,
+              fields: {
+                "Nome-Button": "Compra",
+                "Categorias-Filtradas": "Compra",
+                "Apenas-Projetos": "FALSE",
+                "Status-Selecionados": "Aberto",
+                "Categorias-Duplicadas": "FALSE",
+                "Colunas": "Categoria, Descrição, Recebedor, Preço total",
+                "Ativar-Atalho": true
+              },
+              isNew: false,
+              isModified: false
+            },
+            {
+              id: makeId(),
+              rowNumber: 3,
+              fields: {
+                "Nome-Button": "Teste",
+                "Categorias-Filtradas": "Compra",
+                "Apenas-Projetos": "",
+                "Status-Selecionados": "Aberto",
+                "Categorias-Duplicadas": "FALSE",
+                "Colunas": "Categoria, Descrição, Status, Recebedor",
+                "Ativar-Atalho": true
+              },
+              isNew: false,
+              isModified: false
+            }
+          ];
         }
         state.shortcutDeletes.clear();
 
@@ -1217,7 +1435,6 @@
         input.checked = selectedStatuses.has(input.value.toLocaleLowerCase("pt-BR"));
       });
     } else {
-      // Padrão do site: Aberto marcado
       statusInputs.forEach((input) => {
         input.checked = (input.value === "Aberto");
       });
@@ -1274,7 +1491,6 @@
     byId("shortcut-duplicate-select").value = fields["Categorias-Duplicadas"] || "";
     byId("shortcut-active-switch").checked = (fields["Ativar-Atalho"] !== false);
 
-    // Status checks
     const statusSet = new Set(
       String(fields["Status-Selecionados"] || "")
         .split(",")
@@ -1285,7 +1501,6 @@
       cb.checked = statusSet.has(cb.value.toLocaleLowerCase("pt-BR"));
     });
 
-    // Colunas checks
     const colSet = new Set(
       String(fields["Colunas"] || "")
         .split(",")
@@ -1305,7 +1520,6 @@
       colContainer.appendChild(label);
     });
 
-    // Categorias-Filtradas
     state.shortcutSelectedCategories = new Set(
       String(fields["Categorias-Filtradas"] || "")
         .split(",")
@@ -1535,13 +1749,11 @@
     byId("cat-apply-all").addEventListener("click", () => {
       if (state.categoryConflict) {
         const { oldVal, newVal, record } = state.categoryConflict;
-        // Altera todas as linhas daquela categoria
         state.records.forEach((r) => {
           if (String(currentFields(r).Categoria || "").trim() === oldVal) {
             setPendingValue(r, "Categoria", newVal);
           }
         });
-        // Atualiza atalhos que referenciam oldVal
         state.shortcuts.forEach((sc) => {
           const rawCats = String(sc.fields["Categorias-Filtradas"] || "");
           if (rawCats) {
@@ -1666,7 +1878,7 @@
       }
     });
 
-    // Fechar seletor "Colunas" ao clicar fora (desktop e mobile)
+    // Fechar seletor "Colunas" ao clicar fora
     const colPickerDetails = byId("column-picker-details");
     document.addEventListener("click", (e) => {
       if (colPickerDetails && colPickerDetails.open) {
