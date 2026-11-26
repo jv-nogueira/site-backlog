@@ -56,6 +56,9 @@
     // Cell Editing State (Only on double click)
     editingCell: null, // { recordId, field }
 
+    // Selected column (single-click on th selects it for resize/reorder)
+    selectedColumn: null, // field string | null
+
     // Shortcuts
     shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
     shortcutDeletes: new Set(), // Set of rowNumbers to delete from sheet
@@ -280,23 +283,31 @@
      REDIMENSIONAMENTO DE COLUNA PELO CABEÇALHO
      ------------------------------------------------------------- */
   function setupColumnResize(th, field) {
+    // Botão circular de redimensionar — visível e acionável apenas
+    // quando a coluna estiver selecionada (classe is-col-selected no th).
     const resizer = createElement("div", "col-resizer");
-    resizer.setAttribute("title", "Arraste para redimensionar coluna");
+    resizer.setAttribute("aria-label", "Redimensionar largura da coluna");
+    resizer.setAttribute("role", "button");
+    resizer.setAttribute("tabindex", "-1");
+    resizer.textContent = "◄►";
     th.appendChild(resizer);
 
     let startX = 0;
     let startWidth = 0;
+    let resizing = false;
 
     function onPointerMove(e) {
+      if (!resizing) return;
       const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       const diff = clientX - startX;
       const newWidth = Math.max(4, startWidth + diff);
       th.style.width = newWidth + "px";
-      th.style.minWidth = "";   // sem trava de mínimo por CSS inline
+      th.style.minWidth = "";
       state.columnWidths[field] = newWidth;
     }
 
     function onPointerUp() {
+      resizing = false;
       resizer.classList.remove("is-resizing");
       document.removeEventListener("mousemove", onPointerMove);
       document.removeEventListener("mouseup", onPointerUp);
@@ -305,8 +316,11 @@
     }
 
     function onPointerDown(e) {
+      // Só age se a coluna estiver selecionada
+      if (state.selectedColumn !== field) return;
       e.preventDefault();
       e.stopPropagation();
+      resizing = true;
       resizer.classList.add("is-resizing");
       startX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       startWidth = th.offsetWidth;
@@ -440,14 +454,15 @@
       return el;
     }
 
-    // Aplica altura ao tr e garante que todos os .cell-readonly da linha
-    // entrem em modo expandido para acompanhar a quebra de linha
+    // Aplica altura ao tr e propaga para todos os .cell-readonly da linha.
+    // Se px ≤ COMPACT_H, recolhe automaticamente (arraste para cima).
+    const COMPACT_H = 34; // px — limiar abaixo do qual recolhe ao soltar
+
     function applyRowHeight(px) {
       const tr = getRow();
       if (!tr) return;
       const h = Math.max(26, px);
       tr.style.height = h + "px";
-      // Propaga para todos os readSpans da linha
       tr.querySelectorAll(".cell-readonly").forEach((el) => {
         el.classList.add("is-expanded");
         el.style.height = h + "px";
@@ -455,15 +470,19 @@
       });
     }
 
-    // Recolhe: remove altura forçada do tr e dos readSpans
+    // Recolhe completamente: remove todos os estilos inline e classes de expansão,
+    // devolvendo o tr e as células ao estado compacto original.
     function collapseRow() {
       const tr = getRow();
       if (!tr) return;
       tr.style.height = "";
+      tr.style.minHeight = "";
       tr.querySelectorAll(".cell-readonly").forEach((el) => {
         el.classList.remove("is-expanded");
         el.style.height = "";
         el.style.maxHeight = "";
+        el.style.minHeight = "";
+        el.style.overflow = "";
       });
     }
 
@@ -478,6 +497,11 @@
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
+      // Auto-recolhe se altura ficou abaixo do limiar compacto
+      const tr = getRow();
+      if (tr && tr.offsetHeight <= COMPACT_H) {
+        collapseRow();
+      }
     }
 
     function onDown(e) {
@@ -666,24 +690,45 @@
 
   function renderTableHead(columns) {
     tableHead.replaceChildren();
+    // dragSrcField shared across all th listeners via closure
     let dragSrcField = null;
 
     columns.forEach((field, index) => {
       const th = document.createElement("th");
       if (index === 0) th.classList.add("is-first-col");
       th.dataset.field = field;
-      th.draggable = true;
+      // draggable only enabled when column is selected (set below in click handler)
+      th.draggable = false;
+
+      // Reflect current selection state
+      if (state.selectedColumn === field) th.classList.add("is-col-selected");
 
       if (state.columnWidths[field]) {
         th.style.width = state.columnWidths[field] + "px";
-        th.style.minWidth = "";  // sem trava; deixa CSS da tabela cuidar do mínimo
+        th.style.minWidth = "";
       }
 
       const content = createElement("div", "th-content");
       const label = createElement("span", "th-label", getColumnLabel(field));
-      label.title = "Duplo clique para renomear ou arraste para reordenar";
+      label.title = "Clique para selecionar · Duplo clique para renomear";
 
-      // Duplo clique no cabeçalho para renomear coluna
+      // ── Clique simples: seleciona a coluna (ativa resize + drag)
+      th.addEventListener("click", (e) => {
+        if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
+        e.stopPropagation();
+        const isAlreadySelected = state.selectedColumn === field;
+        // Desseleciona qualquer coluna anterior
+        deselectColumn();
+        if (!isAlreadySelected) {
+          state.selectedColumn = field;
+          th.classList.add("is-col-selected");
+          th.draggable = true; // libera drag nativo para reordenar
+          // Destaca células da coluna selecionada
+          applyColumnHighlight(field, true);
+        }
+      });
+
+      // ── Duplo clique no label: renomear
       label.addEventListener("dblclick", (e) => {
         e.stopPropagation();
         th.draggable = false;
@@ -700,16 +745,14 @@
           } else {
             delete state.pendingColumnRenames[field];
           }
-          th.draggable = true;
+          if (state.selectedColumn === field) th.draggable = true;
           renderTable();
         };
 
         input.addEventListener("keydown", (ke) => {
-          if (ke.key === "Enter") {
-            ke.preventDefault();
-            input.blur();
-          } else if (ke.key === "Escape") {
-            th.draggable = true;
+          if (ke.key === "Enter") { ke.preventDefault(); input.blur(); }
+          else if (ke.key === "Escape") {
+            if (state.selectedColumn === field) th.draggable = true;
             renderTable();
           }
         });
@@ -721,7 +764,7 @@
 
       content.appendChild(label);
 
-      // Botão de filtro da coluna (estilo Google Sheets)
+      // ── Botão de filtro
       const filterBtn = createElement("button", "col-filter-btn", "▼");
       filterBtn.type = "button";
       filterBtn.title = "Filtrar por " + getColumnLabel(field);
@@ -733,7 +776,6 @@
         filterBtn.classList.add("is-active");
         filterBtn.textContent = state.sortDirection === "asc" ? "▲" : "▼";
       }
-
       filterBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         openColumnFilterMenu(field, filterBtn);
@@ -742,11 +784,11 @@
       content.appendChild(filterBtn);
       th.appendChild(content);
 
-      // Drag and drop para reordenar colunas (Desktop)
+      // ── Drag nativo (desktop reorder) — só funciona quando th.draggable=true (coluna selecionada)
       th.addEventListener("dragstart", (e) => {
+        if (state.selectedColumn !== field) { e.preventDefault(); return; }
         if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input")) {
-          e.preventDefault();
-          return;
+          e.preventDefault(); return;
         }
         dragSrcField = field;
         th.classList.add("is-dragging-col");
@@ -774,6 +816,8 @@
         const rect = th.getBoundingClientRect();
         const placeAfter = (e.clientX - rect.left) > (rect.width / 2);
         reorderColumn(dragSrcField, field, placeAfter);
+        // mantém coluna selecionada após reordenar
+        state.selectedColumn = dragSrcField;
       });
 
       th.addEventListener("dragend", () => {
@@ -783,13 +827,101 @@
         });
       });
 
-      // Setup drag resizer
+      // ── Touch reorder (mobile) — só quando coluna selecionada
+      setupTouchReorder(th, field, columns);
+
+      // ── Resize handle (circular, visível só quando selecionada via CSS)
       setupColumnResize(th, field);
 
       tableHead.appendChild(th);
     });
+
     const actionTh = createElement("th", "actions-heading", " ");
     tableHead.appendChild(actionTh);
+  }
+
+  /* ── Helpers de seleção de coluna ── */
+  function deselectColumn() {
+    if (!state.selectedColumn) return;
+    // Remove destaque do th anterior
+    tableHead.querySelectorAll("th.is-col-selected").forEach((el) => {
+      el.classList.remove("is-col-selected");
+      el.draggable = false;
+    });
+    applyColumnHighlight(state.selectedColumn, false);
+    state.selectedColumn = null;
+  }
+
+  function applyColumnHighlight(field, on) {
+    // Aplica/remove classe is-col-highlighted nas tds da coluna
+    const index = state.columnOrder.filter((f) => state.visibleColumns.has(f)).indexOf(field);
+    if (index === -1) return;
+    tableBody.querySelectorAll("tr").forEach((tr) => {
+      const td = tr.children[index];
+      if (td) td.classList.toggle("is-col-highlighted", on);
+    });
+  }
+
+  /* ── Touch drag-to-reorder do cabeçalho (mobile) ── */
+  function setupTouchReorder(th, field, columns) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let dragging = false;
+    let ghost = null;
+
+    th.addEventListener("touchstart", (e) => {
+      if (state.selectedColumn !== field) return;
+      if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn")) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      dragging = false;
+    }, { passive: true });
+
+    th.addEventListener("touchmove", (e) => {
+      if (state.selectedColumn !== field) return;
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+        dragging = true;
+        th.classList.add("is-dragging-col");
+        // Ghost visual
+        ghost = createElement("div", "col-drag-ghost", getColumnLabel(field));
+        document.body.appendChild(ghost);
+      }
+      if (!dragging) return;
+      e.preventDefault();
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      ghost.style.left = (x - 20) + "px";
+      ghost.style.top  = (y - 16) + "px";
+      // Realça th de destino
+      tableHead.querySelectorAll("th[data-field]").forEach((targetTh) => {
+        const rect = targetTh.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right) {
+          const isRight = (x - rect.left) > rect.width / 2;
+          targetTh.classList.toggle("drag-over-right", isRight && targetTh !== th);
+          targetTh.classList.toggle("drag-over-left", !isRight && targetTh !== th);
+        } else {
+          targetTh.classList.remove("drag-over-left", "drag-over-right");
+        }
+      });
+    }, { passive: false });
+
+    th.addEventListener("touchend", (e) => {
+      if (!dragging) { dragging = false; return; }
+      dragging = false;
+      th.classList.remove("is-dragging-col");
+      if (ghost) { ghost.remove(); ghost = null; }
+      tableHead.querySelectorAll("th[data-field]").forEach((targetTh) => {
+        const isLeft  = targetTh.classList.contains("drag-over-left");
+        const isRight = targetTh.classList.contains("drag-over-right");
+        targetTh.classList.remove("drag-over-left", "drag-over-right");
+        if ((isLeft || isRight) && targetTh !== th) {
+          reorderColumn(field, targetTh.dataset.field, isRight);
+          state.selectedColumn = field; // mantém seleção após reordenar
+        }
+      });
+    });
   }
 
   function renderTable() {
@@ -2199,6 +2331,15 @@
     document.addEventListener("click", (e) => {
       if (!columnFilterMenu.hidden && !columnFilterMenu.contains(e.target) && !e.target.closest(".col-filter-btn")) {
         closeColumnFilterMenu();
+      }
+    });
+
+    // Desselecionar coluna ao clicar fora do thead
+    document.addEventListener("click", (e) => {
+      if (state.selectedColumn && !e.target.closest("thead")) {
+        deselectColumn();
+        // re-aplica destaque das colunas selecionadas (remove)
+        tableHead.querySelectorAll("th").forEach((el) => el.classList.remove("is-col-selected"));
       }
     });
 
