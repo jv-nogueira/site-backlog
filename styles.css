@@ -475,7 +475,7 @@ td {
   padding: 4px 8px;
   border-top: 1px solid var(--table-border);
   border-right: 1px solid var(--table-border);
-  vertical-align: middle;
+  vertical-align: top; /* top para que conteúdo expandido flua de cima para baixo */
   background: var(--surface);
   overflow: hidden;
   user-select: none;
@@ -521,13 +521,16 @@ tbody tr.context-focus-row td {
   box-sizing: border-box;
 }
 .cell-readonly.is-expanded {
+  /* height é controlado via JS (tr height); auto permite crescer até esse limite */
   height: auto;
+  max-height: none;
   min-height: 26px;
   line-height: 1.4;
   padding: 4px 18px 4px 4px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+  overflow: visible; /* conteúdo visível dentro da altura imposta ao tr */
 }
 .cell-readonly:hover {
   background: rgba(71, 104, 223, 0.05);
@@ -644,6 +647,20 @@ td.is-editing textarea {
 }
 
 .project-cell { text-align: center; }
+
+/* Wrapper da checkbox de Projeto em modo leitura.
+   pointer-events:none na checkbox garante que todos os eventos
+   (incluindo dblclick) cheguem ao td, onde o listener está registrado. */
+.project-check-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* delega eventos ao td pai */
+}
+.project-check-wrap input[type="checkbox"] {
+  pointer-events: none;
+  cursor: default;
+}
 .empty-state { min-height: 210px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .empty-state[hidden] { display: none !important; }
 .empty-state strong { color: var(--ink); font-size: 13px; }

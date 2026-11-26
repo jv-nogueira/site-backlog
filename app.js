@@ -380,12 +380,17 @@
     }
 
     if (field === "Projeto") {
+      // Wrapper posiciona a checkbox e captura o dblclick de forma confiável.
+      // A checkbox fica com pointer-events:none para que todos os eventos
+      // (incluindo dblclick) cheguem ao td, onde o listener já está registrado.
+      const wrap = createElement("div", "project-check-wrap");
       const chk = document.createElement("input");
       chk.type = "checkbox";
       chk.checked = Boolean(values.Projeto);
-      chk.disabled = true; // Só editável com dblclick
-      chk.title = "Duplo clique para alterar";
-      cell.appendChild(chk);
+      chk.setAttribute("aria-label", "Projeto");
+      chk.tabIndex = -1; // foco gerenciado pelo td
+      wrap.appendChild(chk);
+      cell.appendChild(wrap);
       return cell;
     }
 
@@ -408,17 +413,11 @@
     readSpan.title = "Duplo clique para editar";
     wrap.appendChild(readSpan);
 
+    // Marca o wrap para inserção condicional da alça após render
+    // (a medição só é confiável depois que o elemento está no DOM com layout calculado)
     if (rawVal) {
-      window.requestAnimationFrame(() => {
-        const hasNewline = rawVal.includes("\n");
-        const overflows = readSpan.scrollWidth > readSpan.clientWidth + 1 || readSpan.scrollHeight > readSpan.clientHeight + 1;
-        if (hasNewline || overflows) {
-          const handle = createElement("div", "cell-expand-handle", "⤡");
-          handle.title = "Arraste para expandir ou duplo clique para recolher";
-          setupCellExpand(handle, readSpan);
-          wrap.appendChild(handle);
-        }
-      });
+      wrap.dataset.needsExpandCheck = "1";
+      wrap.dataset.rawVal = rawVal;
     }
 
     cell.appendChild(wrap);
@@ -427,24 +426,50 @@
 
   /* -------------------------------------------------------------
      ALÇA DE ARRASTE PARA EXPANDIR VISUALIZAÇÃO DE CÉLULA
+     Apenas vertical: a altura é aplicada ao <tr> para que todas as
+     células da linha acompanhem. A largura da coluna não é tocada.
      ------------------------------------------------------------- */
   function setupCellExpand(handle, targetEl) {
-    let startX = 0;
     let startY = 0;
-    let startHeight = 0;
-    let startWidth = 0;
+    let startRowHeight = 0;
+
+    // Encontra o <tr> ancestral para controlar a altura da linha inteira
+    function getRow() {
+      let el = targetEl;
+      while (el && el.tagName !== "TR") el = el.parentElement;
+      return el;
+    }
+
+    // Aplica altura ao tr e garante que todos os .cell-readonly da linha
+    // entrem em modo expandido para acompanhar a quebra de linha
+    function applyRowHeight(px) {
+      const tr = getRow();
+      if (!tr) return;
+      const h = Math.max(26, px);
+      tr.style.height = h + "px";
+      // Propaga para todos os readSpans da linha
+      tr.querySelectorAll(".cell-readonly").forEach((el) => {
+        el.classList.add("is-expanded");
+        el.style.height = h + "px";
+        el.style.maxHeight = "none";
+      });
+    }
+
+    // Recolhe: remove altura forçada do tr e dos readSpans
+    function collapseRow() {
+      const tr = getRow();
+      if (!tr) return;
+      tr.style.height = "";
+      tr.querySelectorAll(".cell-readonly").forEach((el) => {
+        el.classList.remove("is-expanded");
+        el.style.height = "";
+        el.style.maxHeight = "";
+      });
+    }
 
     function onMove(e) {
-      const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
-      const diffY = clientY - startY;
-      const diffX = clientX - startX;
-      const newHeight = Math.max(26, startHeight + diffY);
-      const newWidth = Math.max(40, startWidth + diffX);
-      targetEl.classList.add("is-expanded");
-      targetEl.style.height = newHeight + "px";
-      targetEl.style.maxHeight = "none";
-      targetEl.style.width = newWidth + "px";
+      applyRowHeight(startRowHeight + (clientY - startY));
     }
 
     function onUp() {
@@ -459,10 +484,9 @@
       e.preventDefault();
       e.stopPropagation();
       handle.classList.add("is-dragging");
-      startX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
       startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
-      startHeight = targetEl.offsetHeight;
-      startWidth = targetEl.offsetWidth;
+      const tr = getRow();
+      startRowHeight = tr ? tr.offsetHeight : targetEl.offsetHeight;
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
       document.addEventListener("touchmove", onMove, { passive: false });
@@ -471,13 +495,12 @@
 
     handle.addEventListener("mousedown", onDown);
     handle.addEventListener("touchstart", onDown, { passive: false });
+
+    // Duplo clique na alça: recolhe a linha
     handle.addEventListener("dblclick", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      targetEl.classList.remove("is-expanded");
-      targetEl.style.height = "";
-      targetEl.style.maxHeight = "";
-      targetEl.style.width = "";
+      collapseRow();
     });
   }
 
@@ -496,13 +519,34 @@
     if (field === "Projeto") {
       input = document.createElement("input");
       input.type = "checkbox";
-      input.checked = Boolean(values[field]);
+      // O dblclick que ativou este modo já constitui a intenção de alternar.
+      // Iniciamos com o valor alternado para que o primeiro clique/change salve.
+      const originalVal = Boolean(values[field]);
+      input.checked = !originalVal; // já alternado pelo dblclick
       input.setAttribute("aria-label", "Projeto");
-      input.addEventListener("change", () => finishEdit(input.checked));
+
+      let committed = false;
+      function commit() {
+        if (committed) return;
+        committed = true;
+        finishEdit(input.checked);
+      }
+
+      input.addEventListener("change", commit);
       input.addEventListener("blur", () => {
-        state.editingCell = null;
-        renderTable();
+        // Se o usuário apenas focou e saiu sem clicar (raro), salva o estado atual
+        if (!committed) commit();
       });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          committed = true; // evita commit no blur
+          state.editingCell = null;
+          renderTable();
+        } else if (e.key === "Enter" || e.key === " ") {
+          // Space/Enter alterna; deixa o evento default acontecer, depois commit via change
+        }
+      });
+
       window.setTimeout(() => input.focus(), 0);
       return input;
     }
@@ -788,6 +832,41 @@
     updatePendingControls();
     updateClearColumnFiltersBtn();
     updateSelectionBar();
+
+    // Detecta e insere alças de expansão agora que as células estão no DOM
+    // e o browser já calculou o layout (rAF garante pós-paint)
+    window.requestAnimationFrame(attachExpandHandles);
+  }
+
+  /* -------------------------------------------------------------
+     INSERÇÃO CONDICIONAL DA ALÇA DE EXPANSÃO (pós-render)
+     Medição após layout: scrollHeight > clientHeight indica que
+     o conteúdo transborda a altura compacta de 26px.
+     ------------------------------------------------------------- */
+  function attachExpandHandles() {
+    tableBody.querySelectorAll(".cell-expand-wrap[data-needs-expand-check]").forEach((wrap) => {
+      delete wrap.dataset.needsExpandCheck;
+      const rawVal = wrap.dataset.rawVal || "";
+      delete wrap.dataset.rawVal;
+
+      // Já tem alça? não duplica
+      if (wrap.querySelector(".cell-expand-handle")) return;
+
+      const readSpan = wrap.querySelector(".cell-readonly");
+      if (!readSpan) return;
+
+      const hasNewline = rawVal.includes("\n");
+      // Com white-space:normal e height:26px, o scrollHeight reflete
+      // quantas linhas o texto ocupa; se > clientHeight, há overflow real
+      const overflows = readSpan.scrollHeight > readSpan.clientHeight + 1;
+
+      if (hasNewline || overflows) {
+        const handle = createElement("div", "cell-expand-handle", "⤡");
+        handle.title = "Arraste para expandir ou duplo clique para recolher";
+        setupCellExpand(handle, readSpan);
+        wrap.appendChild(handle);
+      }
+    });
   }
 
   function appendRecordRow(record, columns, subtask, duplicateGroup, hiddenCount) {
