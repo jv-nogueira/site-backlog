@@ -290,7 +290,6 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   border: 1.5px solid var(--accent);
   border-radius: 10px;
   box-shadow: var(--shadow-popover);
-  animation: slideDown .2s ease-out;
 }
 .selection-bar[hidden] {
   display: none !important;
@@ -329,7 +328,6 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 #projects-options { left: 0; right: auto; min-width: 155px; }
 
 /* Table Section & Toolbar */
-.table-card { margin-top: 17px; overflow: hidden; }
 .table-toolbar { min-height: 49px; display: flex; justify-content: space-between; align-items: center; padding: 8px 17px; border-bottom: 1px solid var(--line); gap: 16px; flex-wrap: wrap; }
 .result-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .result-count { margin: 0; color: var(--ink); font-size: 12px; font-weight: 700; }
@@ -622,6 +620,21 @@ td.is-col-wrapped .cell-readonly {
   overflow-wrap: anywhere;
   overflow: visible;
   max-height: none;
+}
+
+/* Linha explicitamente cortada: formato compacto,
+   sobrescreve is-col-wrapped e is-expanded dentro dessa linha */
+tbody tr.is-clipped .cell-readonly,
+tbody tr.is-clipped td.is-col-wrapped .cell-readonly {
+  height: 26px !important;
+  min-height: 0 !important;
+  max-height: 26px !important;
+  line-height: 26px !important;
+  padding: 0 18px 0 4px !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  overflow: hidden !important;
 }
 
 /* Header rename & drag-and-drop reorder */

@@ -65,6 +65,7 @@
     // Wrap state
     wrappedColumns: new Set(), // Set of field strings with text wrap enabled
     wrappedRows: new Set(),    // Set of recordIds with text wrap enabled
+    clippedRows: new Set(),    // Set of recordIds explicitly clipped (compact override, even inside wrapped columns)
 
     // Shortcuts
     shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
@@ -434,8 +435,6 @@
     return cell;
   }
 
-  
-
   /* -------------------------------------------------------------
      CRIAÇÃO DO INPUT ATIVO EM MODO EDIÇÃO
      ------------------------------------------------------------- */
@@ -637,11 +636,7 @@
           th.classList.remove("is-col-selected");
           th.draggable = false;
           applyColumnHighlight(field, false);
-          if (state.selectedColumns.size === 0) {
-            updateSelectionBar();
-          } else {
-            updateSelectionBar();
-          }
+          updateSelectionBar();
         } else {
           // Adiciona ao Set de colunas selecionadas
           // Limpa seleção de linha quando uma coluna é selecionada
@@ -790,17 +785,16 @@
   }
 
   function applyColumnHighlight(field, on) {
-    // Aplica/remove classe is-col-highlighted e is-col-wrapped nas tds da coluna
+    // Aplica/remove APENAS is-col-highlighted — nunca toca em is-col-wrapped,
+    // que é estado independente da seleção e gerenciado exclusivamente por
+    // applyAllColumnWraps() / clipSelection().
     const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
     const index = visibleCols.indexOf(field);
     if (index === -1) return;
-    const isWrapped = state.wrappedColumns.has(field);
     tableBody.querySelectorAll("tr").forEach((tr) => {
       const td = tr.children[index];
       if (!td) return;
       td.classList.toggle("is-col-highlighted", on);
-      // Mantém is-col-wrapped independentemente da seleção
-      td.classList.toggle("is-col-wrapped", isWrapped);
     });
   }
 
@@ -928,9 +922,16 @@
       const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
       if (tr) tr.classList.add("is-expanded");
     });
+    // Reaplica is-clipped (sobrescreve is-expanded nas linhas explicitamente cortadas)
+    state.clippedRows.forEach((recordId) => {
+      const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
+      if (tr) {
+        tr.classList.remove("is-expanded");
+        tr.style.minHeight = "";
+        tr.classList.add("is-clipped");
+      }
+    });
   }
-
-  
 
   function appendRecordRow(record, columns, subtask, duplicateGroup, hiddenCount) {
     const tr = document.createElement("tr");
@@ -950,6 +951,12 @@
     // Aplica is-expanded para linhas com wrap de texto ativado via botão Ajustar
     if (state.wrappedRows.has(record.id)) {
       tr.classList.add("is-expanded");
+    }
+    // is-clipped sobrescreve is-expanded: linha explicitamente cortada fica compacta
+    if (state.clippedRows.has(record.id)) {
+      tr.classList.remove("is-expanded");
+      tr.style.minHeight = "";
+      tr.classList.add("is-clipped");
     }
 
     // Click in selection mode toggles selection
@@ -985,7 +992,6 @@
         return;
       }
       if (e.touches.length === 1) {
-        const touch = e.touches[0];
         longPressTimeout = setTimeout(() => {
           state.selectionMode = true;
           state.selectedRowIds.add(record.id);
@@ -1066,6 +1072,8 @@
         const h = Math.max(26, px);
         tr.style.minHeight = h + "px";
         if (h > 26) {
+          state.clippedRows.delete(record.id);
+          tr.classList.remove("is-clipped");
           state.rowHeights.set(record.id, h);
           tr.classList.add("is-expanded");
         } else {
@@ -1136,7 +1144,7 @@
 
   function updateSelectionBar() {
     const bar = byId("selection-bar");
-    const infoEl = byId("selection-info");
+    const infoEl = byId("selection-count") || byId("selection-info");
     const copyBtn = byId("copy-selection-btn");
     const dupBtn = byId("duplicate-selection-btn");
 
@@ -1147,12 +1155,12 @@
       bar.hidden = false;
       if (hasRows) {
         const n = state.selectedRowIds.size;
-        infoEl.textContent = n + (n === 1 ? " linha selecionada" : " linhas selecionadas");
+        if (infoEl) infoEl.textContent = n + (n === 1 ? " linha selecionada" : " linhas selecionadas");
         if (copyBtn) copyBtn.hidden = false;
         if (dupBtn) dupBtn.hidden = false;
       } else {
         const n = state.selectedColumns.size;
-        infoEl.textContent = n + (n === 1 ? " coluna selecionada" : " colunas selecionadas");
+        if (infoEl) infoEl.textContent = n + (n === 1 ? " coluna selecionada" : " colunas selecionadas");
         if (copyBtn) copyBtn.hidden = true;
         if (dupBtn) dupBtn.hidden = true;
       }
@@ -1197,22 +1205,27 @@
 
   function wrapSelection() {
     if (state.selectedColumns.size > 0) {
-      // Ajusta texto nas colunas selecionadas
+      // Ajusta texto nas colunas selecionadas (não afeta linhas)
       state.selectedColumns.forEach((field) => state.wrappedColumns.add(field));
       applyAllColumnWraps();
     } else if (state.selectedRowIds.size > 0) {
-      // Ajusta texto nas linhas selecionadas
+      // Ajusta texto nas linhas selecionadas:
+      // remove de clippedRows (exceção compacta) e adiciona a wrappedRows
       state.selectedRowIds.forEach((recordId) => {
+        state.clippedRows.delete(recordId);
         state.wrappedRows.add(recordId);
         const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
-        if (tr) tr.classList.add("is-expanded");
+        if (tr) {
+          tr.classList.remove("is-clipped");
+          tr.classList.add("is-expanded");
+        }
       });
     }
   }
 
   function clipSelection() {
     if (state.selectedColumns.size > 0) {
-      // Retorna colunas selecionadas ao formato compactado
+      // Retorna APENAS as colunas selecionadas ao formato compactado (não toca em linhas)
       state.selectedColumns.forEach((field) => {
         state.wrappedColumns.delete(field);
         const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
@@ -1224,14 +1237,18 @@
         });
       });
     } else if (state.selectedRowIds.size > 0) {
-      // Retorna linhas selecionadas ao formato compactado
+      // Retorna linhas selecionadas ao formato compactado:
+      // adiciona a clippedRows (exceção), remove de wrappedRows e rowHeights
+      // NÃO altera wrappedColumns — a coluna continua ajustada para as outras linhas
       state.selectedRowIds.forEach((recordId) => {
         state.wrappedRows.delete(recordId);
         state.rowHeights.delete(recordId);
+        state.clippedRows.add(recordId);
         const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
         if (tr) {
           tr.classList.remove("is-expanded");
           tr.style.minHeight = "";
+          tr.classList.add("is-clipped");
         }
       });
     }
@@ -1464,6 +1481,10 @@
     state.expanded.clear();
     state.shortcutDeletes.clear();
     state.editingCell = null;
+    state.wrappedColumns.clear();
+    state.wrappedRows.clear();
+    state.clippedRows.clear();
+    state.rowHeights.clear();
     state.pendingColumnRenames = {};
     state.columnOrder = state.originalColumnOrder.slice();
     state.columnOrderChanged = false;
@@ -1815,11 +1836,11 @@
       const group = createElement("div", "shortcut-pill-group");
       if (sc.isNew || sc.isModified) group.classList.add("is-pending-shortcut");
 
-       const applyBtn = createElement("button", "shortcut-apply-btn", sc.fields["Nome-Button"]);
-       applyBtn.type = "button";
-       applyBtn.title = "Aplicar filtros deste atalho";
-       if (state.activeShortcutId === sc.id) applyBtn.classList.add("is-active");
-       applyBtn.addEventListener("click", () => applyShortcut(sc));
+      const applyBtn = createElement("button", "shortcut-apply-btn", sc.fields["Nome-Button"]);
+      applyBtn.type = "button";
+      applyBtn.title = "Aplicar filtros deste atalho";
+      if (state.activeShortcutId === sc.id) applyBtn.classList.add("is-active");
+      applyBtn.addEventListener("click", () => applyShortcut(sc));
 
       const editBtn = createElement("button", "shortcut-edit-btn", "✎");
       editBtn.type = "button";
@@ -2171,14 +2192,14 @@
     const projTrueCb = byId("filter-projects-true");
     const projFalseCb = byId("filter-projects-false");
     const handleProjectFilterChange = (changedCb) => {
-       if (!projTrueCb.checked && !projFalseCb.checked) {
-         changedCb.checked = true;
-         notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
-         return;
-       }
-       state.activeShortcutId = null;
-       renderShortcutsBar();
-       renderTable();
+      if (!projTrueCb.checked && !projFalseCb.checked) {
+        changedCb.checked = true;
+        notify('Selecione pelo menos uma opção ("Projetos" ou "Não projetos").', true);
+        return;
+      }
+      state.activeShortcutId = null;
+      renderShortcutsBar();
+      renderTable();
     };
     projTrueCb.addEventListener("change", () => handleProjectFilterChange(projTrueCb));
     projFalseCb.addEventListener("change", () => handleProjectFilterChange(projFalseCb));
@@ -2245,7 +2266,7 @@
     });
     byId("cat-apply-all").addEventListener("click", () => {
       if (state.categoryConflict) {
-        const { oldVal, newVal, record } = state.categoryConflict;
+        const { oldVal, newVal } = state.categoryConflict;
         state.records.forEach((r) => {
           if (String(currentFields(r).Categoria || "").trim() === oldVal) {
             setPendingValue(r, "Categoria", newVal);
