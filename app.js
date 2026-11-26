@@ -614,21 +614,30 @@
 
       const content = createElement("div", "th-content");
       const label = createElement("span", "th-label", getColumnLabel(field));
-      label.title = "Clique para selecionar · Duplo clique para renomear";
+      label.title = "Clique direito para selecionar · Duplo clique para renomear";
 
-      // ── Clique simples: seleciona a coluna (ativa resize + drag)
+      // ── Clique simples: não seleciona mais coluna (seleção agora via clique direito)
       th.addEventListener("click", (e) => {
         if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
+        e.stopPropagation();
+      });
+
+      // ── Clique direito: seleciona/desseleciona a coluna (ativa resize + drag)
+      th.addEventListener("contextmenu", (e) => {
+        if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
+        e.preventDefault();
         e.stopPropagation();
         const isAlreadySelected = state.selectedColumn === field;
         // Desseleciona qualquer coluna anterior
         deselectColumn();
-        // Limpa seleção de linha quando uma coluna é selecionada
-        if (state.selectedRowIds.size > 0) {
-          state.selectionMode = false;
-          state.selectedRowIds.clear();
-        }
         if (!isAlreadySelected) {
+          // Limpa seleção de linha quando uma coluna é selecionada
+          if (state.selectedRowIds.size > 0) {
+            state.selectionMode = false;
+            state.selectedRowIds.clear();
+            updateSelectionBar();
+            tableBody.querySelectorAll("tr.selected-row").forEach((tr) => tr.classList.remove("selected-row"));
+          }
           state.selectedColumn = field;
           th.classList.add("is-col-selected");
           th.draggable = true; // libera drag nativo para reordenar
@@ -873,6 +882,10 @@
     updatePendingControls();
     updateClearColumnFiltersBtn();
     updateSelectionBar();
+    // Reaplica destaque da coluna selecionada após re-render (não se perde ao selecionar/alterar linhas)
+    if (state.selectedColumn) {
+      applyColumnHighlight(state.selectedColumn, true);
+    }
 
   }
 
