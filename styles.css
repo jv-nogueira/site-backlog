@@ -305,6 +305,15 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   align-items: center;
   gap: 8px;
 }
+.selection-height-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.selection-height-group .height-label {
+  font-size: 11px;
+  color: var(--muted);
+}
 
 /* Cards */
 .controls-card, .table-card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
@@ -555,17 +564,16 @@ tbody tr.context-focus-row td {
   overflow: hidden;
   box-sizing: border-box;
 }
-.cell-readonly.is-expanded {
-  /* height é controlado via JS (tr height); auto permite crescer até esse limite */
+tbody tr.is-expanded .cell-readonly {
   height: auto;
-  max-height: none;
   min-height: 26px;
   line-height: 1.4;
   padding: 4px 18px 4px 4px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  overflow: visible; /* conteúdo visível dentro da altura imposta ao tr */
+  overflow: visible;
+  max-height: none;
 }
 .cell-readonly:hover {
   background: rgba(71, 104, 223, 0.05);
@@ -600,32 +608,6 @@ th.drag-over-right {
   box-shadow: inset -4px 0 0 var(--accent) !important;
 }
 
-/* Alça / Botão de arraste para expandir visualização de texto longo */
-.cell-expand-wrap {
-  position: relative;
-  width: 100%;
-}
-.cell-expand-handle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
-  cursor: se-resize;
-  opacity: 0.35;
-  touch-action: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  user-select: none;
-  transition: opacity .15s;
-}
-.cell-expand-handle:hover,
-.cell-expand-handle.is-dragging {
-  opacity: 1;
-  color: var(--accent);
-}
 
 /* Células em modo de edição */
 td.is-editing {

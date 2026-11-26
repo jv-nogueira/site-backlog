@@ -41,6 +41,9 @@
     selectionMode: false,
     selectedRowIds: new Set(),
 
+    // Altura customizada por linha (record.id -> px), persistente na sessão
+    rowHeights: new Map(),
+
     // Pending Category Conflict
     categoryConflict: null, // { record, oldVal, newVal }
 
@@ -419,114 +422,16 @@
       return cell;
     }
 
-    // Campo de texto geral ou Descrição / Observação com alça de arraste condicional
-    const wrap = createElement("div", "cell-expand-wrap");
+    // Campo de texto geral (Descrição / Observação etc.) — leitura; edição por duplo clique
     const rawVal = escapeText(values[field]);
     const readSpan = createElement("div", "cell-readonly", rawVal || "—");
     if (!rawVal) readSpan.classList.add("is-empty");
     readSpan.title = "Duplo clique para editar";
-    wrap.appendChild(readSpan);
-
-    // Marca o wrap para inserção condicional da alça após render
-    // (a medição só é confiável depois que o elemento está no DOM com layout calculado)
-    if (rawVal) {
-      wrap.dataset.needsExpandCheck = "1";
-      wrap.dataset.rawVal = rawVal;
-    }
-
-    cell.appendChild(wrap);
+    cell.appendChild(readSpan);
     return cell;
   }
 
-  /* -------------------------------------------------------------
-     ALÇA DE ARRASTE PARA EXPANDIR VISUALIZAÇÃO DE CÉLULA
-     Apenas vertical: a altura é aplicada ao <tr> para que todas as
-     células da linha acompanhem. A largura da coluna não é tocada.
-     ------------------------------------------------------------- */
-  function setupCellExpand(handle, targetEl) {
-    let startY = 0;
-    let startRowHeight = 0;
-
-    // Encontra o <tr> ancestral para controlar a altura da linha inteira
-    function getRow() {
-      let el = targetEl;
-      while (el && el.tagName !== "TR") el = el.parentElement;
-      return el;
-    }
-
-    // Aplica altura ao tr e propaga para todos os .cell-readonly da linha.
-    // Se px ≤ COMPACT_H, recolhe automaticamente (arraste para cima).
-    const COMPACT_H = 34; // px — limiar abaixo do qual recolhe ao soltar
-
-    function applyRowHeight(px) {
-      const tr = getRow();
-      if (!tr) return;
-      const h = Math.max(26, px);
-      tr.style.height = h + "px";
-      tr.querySelectorAll(".cell-readonly").forEach((el) => {
-        el.classList.add("is-expanded");
-        el.style.height = h + "px";
-        el.style.maxHeight = "none";
-      });
-    }
-
-    // Recolhe completamente: remove todos os estilos inline e classes de expansão,
-    // devolvendo o tr e as células ao estado compacto original.
-    function collapseRow() {
-      const tr = getRow();
-      if (!tr) return;
-      tr.style.height = "";
-      tr.style.minHeight = "";
-      tr.querySelectorAll(".cell-readonly").forEach((el) => {
-        el.classList.remove("is-expanded");
-        el.style.height = "";
-        el.style.maxHeight = "";
-        el.style.minHeight = "";
-        el.style.overflow = "";
-      });
-    }
-
-    function onMove(e) {
-      const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
-      applyRowHeight(startRowHeight + (clientY - startY));
-    }
-
-    function onUp() {
-      handle.classList.remove("is-dragging");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onUp);
-      // Auto-recolhe se altura ficou abaixo do limiar compacto
-      const tr = getRow();
-      if (tr && tr.offsetHeight <= COMPACT_H) {
-        collapseRow();
-      }
-    }
-
-    function onDown(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      handle.classList.add("is-dragging");
-      startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
-      const tr = getRow();
-      startRowHeight = tr ? tr.offsetHeight : targetEl.offsetHeight;
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-      document.addEventListener("touchmove", onMove, { passive: false });
-      document.addEventListener("touchend", onUp);
-    }
-
-    handle.addEventListener("mousedown", onDown);
-    handle.addEventListener("touchstart", onDown, { passive: false });
-
-    // Duplo clique na alça: recolhe a linha
-    handle.addEventListener("dblclick", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      collapseRow();
-    });
-  }
+  
 
   /* -------------------------------------------------------------
      CRIAÇÃO DO INPUT ATIVO EM MODO EDIÇÃO
@@ -965,41 +870,9 @@
     updateClearColumnFiltersBtn();
     updateSelectionBar();
 
-    // Detecta e insere alças de expansão agora que as células estão no DOM
-    // e o browser já calculou o layout (rAF garante pós-paint)
-    window.requestAnimationFrame(attachExpandHandles);
   }
 
-  /* -------------------------------------------------------------
-     INSERÇÃO CONDICIONAL DA ALÇA DE EXPANSÃO (pós-render)
-     Medição após layout: scrollHeight > clientHeight indica que
-     o conteúdo transborda a altura compacta de 26px.
-     ------------------------------------------------------------- */
-  function attachExpandHandles() {
-    tableBody.querySelectorAll(".cell-expand-wrap[data-needs-expand-check]").forEach((wrap) => {
-      delete wrap.dataset.needsExpandCheck;
-      const rawVal = wrap.dataset.rawVal || "";
-      delete wrap.dataset.rawVal;
-
-      // Já tem alça? não duplica
-      if (wrap.querySelector(".cell-expand-handle")) return;
-
-      const readSpan = wrap.querySelector(".cell-readonly");
-      if (!readSpan) return;
-
-      const hasNewline = rawVal.includes("\n");
-      // Com white-space:normal e height:26px, o scrollHeight reflete
-      // quantas linhas o texto ocupa; se > clientHeight, há overflow real
-      const overflows = readSpan.scrollHeight > readSpan.clientHeight + 1;
-
-      if (hasNewline || overflows) {
-        const handle = createElement("div", "cell-expand-handle", "⤡");
-        handle.title = "Arraste para expandir ou duplo clique para recolher";
-        setupCellExpand(handle, readSpan);
-        wrap.appendChild(handle);
-      }
-    });
-  }
+  
 
   function appendRecordRow(record, columns, subtask, duplicateGroup, hiddenCount) {
     const tr = document.createElement("tr");
@@ -1009,6 +882,13 @@
     if (state.creates.has(record.id)) tr.classList.add("is-new-row");
     if (state.selectedRowIds.has(record.id)) tr.classList.add("selected-row");
     if (activeContextRecord && activeContextRecord.id === record.id) tr.classList.add("context-focus-row");
+
+    // Aplica altura customizada da linha, se houver (persiste entre re-renders)
+    const savedHeight = state.rowHeights.get(record.id);
+    if (savedHeight && savedHeight > 26) {
+      tr.style.minHeight = savedHeight + "px";
+      tr.classList.add("is-expanded");
+    }
 
     // Click in selection mode toggles selection
     tr.addEventListener("click", (e) => {
@@ -1027,15 +907,17 @@
       openContextMenu(e.clientX, e.clientY, record);
     });
 
-    // Touch long press mobile
+    // Touch long press mobile: seleciona a linha diretamente, sem abrir menu de contexto
     tr.addEventListener("touchstart", (e) => {
-      if (e.target.closest(".is-editing") || e.target.closest(".cell-expand-handle")) {
+      if (e.target.closest(".is-editing")) {
         return;
       }
       if (e.touches.length === 1) {
         const touch = e.touches[0];
         longPressTimeout = setTimeout(() => {
-          openContextMenu(touch.clientX, touch.clientY, record);
+          state.selectionMode = true;
+          state.selectedRowIds.add(record.id);
+          renderTable();
         }, 550);
       }
     }, { passive: true });
@@ -1190,6 +1072,55 @@
     createRecord(newFields);
     renderTable();
     notify("Linha duplicada como pendente. Salve para gravar.");
+  }
+
+  function duplicateSelectedRows() {
+    if (state.selectedRowIds.size === 0) return;
+    const records = state.records.filter((r) => state.selectedRowIds.has(r.id));
+    records.forEach((record) => {
+      const orig = currentFields(record);
+      const newFields = Object.assign({}, orig);
+      createRecord(newFields);
+    });
+    state.selectionMode = false;
+    state.selectedRowIds.clear();
+    renderTable();
+    notify(records.length + " linha(s) duplicada(s) como pendente(s). Salve para gravar.");
+  }
+
+  function adjustSelectedRowHeights(delta) {
+    if (state.selectedRowIds.size === 0) return;
+    state.selectedRowIds.forEach((id) => {
+      const current = state.rowHeights.get(id) || 26;
+      const next = Math.max(26, current + delta);
+      if (next <= 26) {
+        state.rowHeights.delete(id);
+      } else {
+        state.rowHeights.set(id, next);
+      }
+    });
+    applyRowHeightsToDom();
+  }
+
+  function resetSelectedRowHeights() {
+    if (state.selectedRowIds.size === 0) return;
+    state.selectedRowIds.forEach((id) => state.rowHeights.delete(id));
+    applyRowHeightsToDom();
+  }
+
+  function applyRowHeightsToDom() {
+    state.selectedRowIds.forEach((id) => {
+      const tr = tableBody.querySelector('tr[data-record-id="' + id + '"]');
+      if (!tr) return;
+      const h = state.rowHeights.get(id);
+      if (h && h > 26) {
+        tr.style.minHeight = h + "px";
+        tr.classList.add("is-expanded");
+      } else {
+        tr.style.minHeight = "";
+        tr.classList.remove("is-expanded");
+      }
+    });
   }
 
   /* -------------------------------------------------------------
@@ -1822,13 +1753,9 @@
       });
     }
 
-    // 4. Categorias duplicadas
+    // 4. Categorias duplicadas — vazio (ou qualquer valor diferente de TRUE/VERDADEIRO) desliga explicitamente
     const rawDup = String(f["Categorias-Duplicadas"] || "").trim().toUpperCase();
-    if (rawDup === "TRUE" || rawDup === "VERDADEIRO") {
-      byId("group-categories").checked = true;
-    } else if (rawDup === "FALSE" || rawDup === "FALSO") {
-      byId("group-categories").checked = false;
-    }
+    byId("group-categories").checked = rawDup === "TRUE" || rawDup === "VERDADEIRO";
 
     // 5. Colunas (quando definidas, aplicar exatamente essas colunas na ordem configurada)
     const rawCols = String(f["Colunas"] || "").trim();
@@ -2266,7 +2193,13 @@
 
     // Floating Selection Bar
     byId("copy-selection-btn").addEventListener("click", copySelectedRows);
+    byId("duplicate-selection-btn").addEventListener("click", duplicateSelectedRows);
     byId("clear-selection-btn").addEventListener("click", clearSelection);
+
+    // Altura da linha selecionada
+    byId("row-height-increase-btn").addEventListener("click", () => adjustSelectedRowHeights(40));
+    byId("row-height-decrease-btn").addEventListener("click", () => adjustSelectedRowHeights(-40));
+    byId("row-height-reset-btn").addEventListener("click", resetSelectedRowHeights);
 
     // Filtro por Coluna Eventos
     byId("close-column-filter").addEventListener("click", closeColumnFilterMenu);
