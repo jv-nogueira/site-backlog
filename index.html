@@ -65,7 +65,7 @@
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input id="search-input" type="search" placeholder="Buscar na Database..." autocomplete="off">
         </label>
-        <div class="filter-group status-filters" aria-label="Filtrar por status">
+        <div class="filter-group status-filters" role="group" aria-label="Filtrar por status">
           <span class="control-label">Status</span>
           <label class="check-option"><input type="checkbox" name="status-filter" value="Aberto" checked> Aberto</label>
           <label class="check-option"><input type="checkbox" name="status-filter" value="Resolvido"> Resolvido</label>
@@ -76,7 +76,7 @@
         <div class="filter-group">
           <details id="projects-picker-details" class="column-picker">
             <summary id="projects-picker-summary">Projetos <span aria-hidden="true">▾</span></summary>
-            <div id="projects-options" class="column-options" aria-label="Filtrar projetos">
+            <div id="projects-options" class="column-options" role="group" aria-label="Filtrar projetos">
               <label class="check-option"><input id="filter-projects-true" type="checkbox" checked> Projetos</label>
               <label class="check-option"><input id="filter-projects-false" type="checkbox" checked> Não projetos</label>
             </div>
@@ -87,20 +87,22 @@
           <button id="clear-column-filters" class="button button-quiet" type="button" disabled>Limpar filtros de coluna</button>
           <details id="column-picker-details" class="column-picker">
             <summary id="column-picker-summary">Colunas <span aria-hidden="true">▾</span></summary>
-            <div id="column-options" class="column-options" aria-label="Colunas visíveis"></div>
+            <div id="column-options" class="column-options" role="group" aria-label="Colunas visíveis"></div>
           </details>
         </div>
       </div>
     </section>
 
-    <!-- Barra Flutuante de Seleção Múltipla -->
-    <div id="selection-bar" class="selection-bar" hidden>
+    <!-- Barra Flutuante de Seleção Múltipla / Colunas -->
+    <div id="selection-bar" class="selection-bar" role="region" aria-label="Ações de seleção" hidden>
       <div class="selection-info">
-        <span id="selection-count">0</span> linha(s) selecionada(s)
+        <span id="selection-count">0 linha(s) selecionada(s)</span>
       </div>
       <div class="selection-actions">
         <button id="copy-selection-btn" class="button button-primary" type="button">📋 Copiar linhas</button>
         <button id="duplicate-selection-btn" class="button button-secondary" type="button">⧉ Duplicar linha(s)</button>
+        <button id="wrap-selection-btn" class="button button-secondary" type="button">↕ Ajustar</button>
+        <button id="clip-selection-btn" class="button button-secondary" type="button">— Cortar</button>
         <button id="clear-selection-btn" class="button button-secondary" type="button">Sair da seleção</button>
       </div>
     </div>
@@ -216,7 +218,7 @@
           <span>Nome do botão (Nome-Button) *</span>
           <input id="shortcut-name-input" name="Nome-Button" required maxlength="100" placeholder="Ex: Backlog, Projetos...">
         </label>
-        
+
         <div class="form-field form-field-full">
           <span>Categorias filtradas</span>
           <div class="shortcut-cat-selector">

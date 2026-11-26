@@ -59,8 +59,12 @@
     // Cell Editing State (Only on double click)
     editingCell: null, // { recordId, field }
 
-    // Selected column (single-click on th selects it for resize/reorder)
-    selectedColumn: null, // field string | null
+    // Selected columns (right-click on th selects for resize/reorder/wrap)
+    selectedColumns: new Set(), // Set of field strings
+
+    // Wrap state
+    wrappedColumns: new Set(), // Set of field strings with text wrap enabled
+    wrappedRows: new Set(),    // Set of recordIds with text wrap enabled
 
     // Shortcuts
     shortcuts: [], // list of shortcut objects: { id, rowNumber, fields: { "Nome-Button", ... }, isNew, isDeleted, isModified }
@@ -319,7 +323,7 @@
 
     function onPointerDown(e) {
       // Só age se a coluna estiver selecionada
-      if (state.selectedColumn !== field) return;
+      if (!state.selectedColumns.has(field)) return;
       e.preventDefault();
       e.stopPropagation();
       resizing = true;
@@ -605,7 +609,7 @@
       th.draggable = false;
 
       // Reflect current selection state
-      if (state.selectedColumn === field) th.classList.add("is-col-selected");
+      if (state.selectedColumns.has(field)) th.classList.add("is-col-selected");
 
       if (state.columnWidths[field]) {
         th.style.width = state.columnWidths[field] + "px";
@@ -627,22 +631,30 @@
         if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
         e.preventDefault();
         e.stopPropagation();
-        const isAlreadySelected = state.selectedColumn === field;
-        // Desseleciona qualquer coluna anterior
-        deselectColumn();
-        if (!isAlreadySelected) {
+        if (state.selectedColumns.has(field)) {
+          // Deseleciona esta coluna
+          state.selectedColumns.delete(field);
+          th.classList.remove("is-col-selected");
+          th.draggable = false;
+          applyColumnHighlight(field, false);
+          if (state.selectedColumns.size === 0) {
+            updateSelectionBar();
+          } else {
+            updateSelectionBar();
+          }
+        } else {
+          // Adiciona ao Set de colunas selecionadas
           // Limpa seleção de linha quando uma coluna é selecionada
           if (state.selectedRowIds.size > 0) {
             state.selectionMode = false;
             state.selectedRowIds.clear();
-            updateSelectionBar();
             tableBody.querySelectorAll("tr.selected-row").forEach((tr) => tr.classList.remove("selected-row"));
           }
-          state.selectedColumn = field;
+          state.selectedColumns.add(field);
           th.classList.add("is-col-selected");
           th.draggable = true; // libera drag nativo para reordenar
-          // Destaca células da coluna selecionada
           applyColumnHighlight(field, true);
+          updateSelectionBar();
         }
       });
 
@@ -663,14 +675,14 @@
           } else {
             delete state.pendingColumnRenames[field];
           }
-          if (state.selectedColumn === field) th.draggable = true;
+          if (state.selectedColumns.has(field)) th.draggable = true;
           renderTable();
         };
 
         input.addEventListener("keydown", (ke) => {
           if (ke.key === "Enter") { ke.preventDefault(); input.blur(); }
           else if (ke.key === "Escape") {
-            if (state.selectedColumn === field) th.draggable = true;
+            if (state.selectedColumns.has(field)) th.draggable = true;
             renderTable();
           }
         });
@@ -704,7 +716,7 @@
 
       // ── Drag nativo (desktop reorder) — só funciona quando th.draggable=true (coluna selecionada)
       th.addEventListener("dragstart", (e) => {
-        if (state.selectedColumn !== field) { e.preventDefault(); return; }
+        if (!state.selectedColumns.has(field)) { e.preventDefault(); return; }
         if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input")) {
           e.preventDefault(); return;
         }
@@ -734,8 +746,7 @@
         const rect = th.getBoundingClientRect();
         const placeAfter = (e.clientX - rect.left) > (rect.width / 2);
         reorderColumn(dragSrcField, field, placeAfter);
-        // mantém coluna selecionada após reordenar
-        state.selectedColumn = dragSrcField;
+        // mantém coluna selecionada após reordenar (já está no Set)
       });
 
       th.addEventListener("dragend", () => {
@@ -759,24 +770,50 @@
   }
 
   /* ── Helpers de seleção de coluna ── */
-  function deselectColumn() {
-    if (!state.selectedColumn) return;
-    // Remove destaque do th anterior
+
+  /** Remove todas as colunas selecionadas */
+  function clearColumnSelection() {
+    if (state.selectedColumns.size === 0) return;
+    state.selectedColumns.forEach((f) => {
+      applyColumnHighlight(f, false);
+    });
+    state.selectedColumns.clear();
     tableHead.querySelectorAll("th.is-col-selected").forEach((el) => {
       el.classList.remove("is-col-selected");
       el.draggable = false;
     });
-    applyColumnHighlight(state.selectedColumn, false);
-    state.selectedColumn = null;
+  }
+
+  /** Alias para compatibilidade com código legado que chamava deselectColumn() */
+  function deselectColumn() {
+    clearColumnSelection();
   }
 
   function applyColumnHighlight(field, on) {
-    // Aplica/remove classe is-col-highlighted nas tds da coluna
-    const index = state.columnOrder.filter((f) => state.visibleColumns.has(f)).indexOf(field);
+    // Aplica/remove classe is-col-highlighted e is-col-wrapped nas tds da coluna
+    const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
+    const index = visibleCols.indexOf(field);
     if (index === -1) return;
+    const isWrapped = state.wrappedColumns.has(field);
     tableBody.querySelectorAll("tr").forEach((tr) => {
       const td = tr.children[index];
-      if (td) td.classList.toggle("is-col-highlighted", on);
+      if (!td) return;
+      td.classList.toggle("is-col-highlighted", on);
+      // Mantém is-col-wrapped independentemente da seleção
+      td.classList.toggle("is-col-wrapped", isWrapped);
+    });
+  }
+
+  /** Reaplica is-col-wrapped em todas as colunas wrapped */
+  function applyAllColumnWraps() {
+    const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
+    state.wrappedColumns.forEach((field) => {
+      const index = visibleCols.indexOf(field);
+      if (index === -1) return;
+      tableBody.querySelectorAll("tr").forEach((tr) => {
+        const td = tr.children[index];
+        if (td) td.classList.add("is-col-wrapped");
+      });
     });
   }
 
@@ -788,7 +825,7 @@
     let ghost = null;
 
     th.addEventListener("touchstart", (e) => {
-      if (state.selectedColumn !== field) return;
+      if (!state.selectedColumns.has(field)) return;
       if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn")) return;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
@@ -796,7 +833,7 @@
     }, { passive: true });
 
     th.addEventListener("touchmove", (e) => {
-      if (state.selectedColumn !== field) return;
+      if (!state.selectedColumns.has(field)) return;
       const dx = e.touches[0].clientX - touchStartX;
       const dy = e.touches[0].clientY - touchStartY;
       if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
@@ -836,7 +873,7 @@
         targetTh.classList.remove("drag-over-left", "drag-over-right");
         if ((isLeft || isRight) && targetTh !== th) {
           reorderColumn(field, targetTh.dataset.field, isRight);
-          state.selectedColumn = field; // mantém seleção após reordenar
+          // selectedColumns já mantém o field após reordenar
         }
       });
     });
@@ -882,11 +919,15 @@
     updatePendingControls();
     updateClearColumnFiltersBtn();
     updateSelectionBar();
-    // Reaplica destaque da coluna selecionada após re-render (não se perde ao selecionar/alterar linhas)
-    if (state.selectedColumn) {
-      applyColumnHighlight(state.selectedColumn, true);
-    }
-
+    // Reaplica destaque de todas as colunas selecionadas após re-render
+    state.selectedColumns.forEach((f) => applyColumnHighlight(f, true));
+    // Reaplica is-col-wrapped em todas as colunas ajustadas
+    applyAllColumnWraps();
+    // Reaplica is-expanded para linhas com wrap ativado
+    state.wrappedRows.forEach((recordId) => {
+      const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
+      if (tr) tr.classList.add("is-expanded");
+    });
   }
 
   
@@ -904,6 +945,10 @@
     const savedHeight = state.rowHeights.get(record.id);
     if (savedHeight && savedHeight > 26) {
       tr.style.minHeight = savedHeight + "px";
+      tr.classList.add("is-expanded");
+    }
+    // Aplica is-expanded para linhas com wrap de texto ativado via botão Ajustar
+    if (state.wrappedRows.has(record.id)) {
       tr.classList.add("is-expanded");
     }
 
@@ -1091,12 +1136,30 @@
 
   function updateSelectionBar() {
     const bar = byId("selection-bar");
-    const countEl = byId("selection-count");
-    if (state.selectedRowIds.size > 0) {
+    const infoEl = byId("selection-info");
+    const copyBtn = byId("copy-selection-btn");
+    const dupBtn = byId("duplicate-selection-btn");
+
+    const hasRows = state.selectedRowIds.size > 0;
+    const hasCols = state.selectedColumns.size > 0;
+
+    if (hasRows || hasCols) {
       bar.hidden = false;
-      countEl.textContent = state.selectedRowIds.size;
+      if (hasRows) {
+        const n = state.selectedRowIds.size;
+        infoEl.textContent = n + (n === 1 ? " linha selecionada" : " linhas selecionadas");
+        if (copyBtn) copyBtn.hidden = false;
+        if (dupBtn) dupBtn.hidden = false;
+      } else {
+        const n = state.selectedColumns.size;
+        infoEl.textContent = n + (n === 1 ? " coluna selecionada" : " colunas selecionadas");
+        if (copyBtn) copyBtn.hidden = true;
+        if (dupBtn) dupBtn.hidden = true;
+      }
     } else {
       bar.hidden = true;
+      if (copyBtn) copyBtn.hidden = false;
+      if (dupBtn) dupBtn.hidden = false;
     }
   }
 
@@ -1128,7 +1191,50 @@
   function clearSelection() {
     state.selectionMode = false;
     state.selectedRowIds.clear();
+    clearColumnSelection();
     renderTable();
+  }
+
+  function wrapSelection() {
+    if (state.selectedColumns.size > 0) {
+      // Ajusta texto nas colunas selecionadas
+      state.selectedColumns.forEach((field) => state.wrappedColumns.add(field));
+      applyAllColumnWraps();
+    } else if (state.selectedRowIds.size > 0) {
+      // Ajusta texto nas linhas selecionadas
+      state.selectedRowIds.forEach((recordId) => {
+        state.wrappedRows.add(recordId);
+        const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
+        if (tr) tr.classList.add("is-expanded");
+      });
+    }
+  }
+
+  function clipSelection() {
+    if (state.selectedColumns.size > 0) {
+      // Retorna colunas selecionadas ao formato compactado
+      state.selectedColumns.forEach((field) => {
+        state.wrappedColumns.delete(field);
+        const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
+        const index = visibleCols.indexOf(field);
+        if (index === -1) return;
+        tableBody.querySelectorAll("tr").forEach((tr) => {
+          const td = tr.children[index];
+          if (td) td.classList.remove("is-col-wrapped");
+        });
+      });
+    } else if (state.selectedRowIds.size > 0) {
+      // Retorna linhas selecionadas ao formato compactado
+      state.selectedRowIds.forEach((recordId) => {
+        state.wrappedRows.delete(recordId);
+        state.rowHeights.delete(recordId);
+        const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
+        if (tr) {
+          tr.classList.remove("is-expanded");
+          tr.style.minHeight = "";
+        }
+      });
+    }
   }
 
   function duplicateRecord(record) {
@@ -2207,6 +2313,8 @@
     // Floating Selection Bar
     byId("copy-selection-btn").addEventListener("click", copySelectedRows);
     byId("duplicate-selection-btn").addEventListener("click", duplicateSelectedRows);
+    byId("wrap-selection-btn").addEventListener("click", wrapSelection);
+    byId("clip-selection-btn").addEventListener("click", clipSelection);
     byId("clear-selection-btn").addEventListener("click", clearSelection);
 
     // Filtro por Coluna Eventos
@@ -2275,12 +2383,11 @@
       }
     });
 
-    // Desselecionar coluna ao clicar fora do thead
+    // Desselecionar colunas ao clicar fora do thead e da barra de seleção
     document.addEventListener("click", (e) => {
-      if (state.selectedColumn && !e.target.closest("thead")) {
-        deselectColumn();
-        // re-aplica destaque das colunas selecionadas (remove)
-        tableHead.querySelectorAll("th").forEach((el) => el.classList.remove("is-col-selected"));
+      if (state.selectedColumns.size > 0 && !e.target.closest("thead") && !e.target.closest("#selection-bar")) {
+        clearColumnSelection();
+        updateSelectionBar();
       }
     });
 
@@ -2302,10 +2409,8 @@
       // Se houver modal/dialog aberto ou célula em edição, não faz nada
       const hasOpenDialog = document.querySelector("dialog[open]") !== null;
       if (hasOpenDialog || state.editingCell) return;
-      if (state.selectedRowIds.size > 0) {
+      if (state.selectedRowIds.size > 0 || state.selectedColumns.size > 0) {
         clearSelection();
-      } else if (state.selectedColumn) {
-        deselectColumn();
       }
     });
 

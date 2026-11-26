@@ -611,6 +611,19 @@ tbody tr.is-expanded .cell-readonly {
   font-style: italic;
 }
 
+/* Coluna com texto ajustado (wrap) */
+td.is-col-wrapped .cell-readonly {
+  height: auto;
+  min-height: 26px;
+  line-height: 1.4;
+  padding: 4px 18px 4px 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  max-height: none;
+}
+
 /* Header rename & drag-and-drop reorder */
 .th-rename-input {
   width: 100%;
