@@ -74,7 +74,6 @@
   const tableHead = byId("table-head");
   const tableBody = byId("table-body");
   const columnFilterMenu = byId("column-filter-menu");
-  const rowContextMenu = byId("row-context-menu");
   let toastTimer;
   let activeContextRecord = null;
   let longPressTimeout = null;
@@ -624,6 +623,11 @@
         const isAlreadySelected = state.selectedColumn === field;
         // Desseleciona qualquer coluna anterior
         deselectColumn();
+        // Limpa seleção de linha quando uma coluna é selecionada
+        if (state.selectedRowIds.size > 0) {
+          state.selectionMode = false;
+          state.selectedRowIds.clear();
+        }
         if (!isAlreadySelected) {
           state.selectedColumn = field;
           th.classList.add("is-col-selected");
@@ -893,18 +897,28 @@
     // Click in selection mode toggles selection
     tr.addEventListener("click", (e) => {
       if (state.selectionMode && !e.target.closest("button") && !e.target.closest("select") && !e.target.closest(".is-editing")) {
+        deselectColumn();
         toggleRowSelection(record.id);
       }
     });
 
-    // Context menu desktop
+    // Context menu (clique direito) na linha: seleciona/altera seleção diretamente, sem menu flutuante
     tr.addEventListener("contextmenu", (e) => {
-      // Se estiver editando uma célula, permite o menu nativo de copiar/colar do navegador
-      if (e.target.closest(".is-editing") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
+      // Se estiver editando uma célula, permite o menu nativo do navegador
+      if (e.target.closest(".is-editing") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") {
         return;
       }
       e.preventDefault();
-      openContextMenu(e.clientX, e.clientY, record);
+      state.selectionMode = true;
+      if (state.selectedRowIds.has(record.id) && state.selectedRowIds.size > 1) {
+        // Alterna: se já selecionada e houver mais de uma, remove
+        state.selectedRowIds.delete(record.id);
+        if (state.selectedRowIds.size === 0) state.selectionMode = false;
+      } else {
+        state.selectedRowIds.add(record.id);
+      }
+      deselectColumn();
+      renderTable();
     });
 
     // Touch long press mobile: seleciona a linha diretamente, sem abrir menu de contexto
@@ -979,38 +993,76 @@
     const action = document.createElement("td");
     action.setAttribute("aria-hidden", "true");
     tr.appendChild(action);
+
+    // Alça vertical de redimensionamento de linha (apenas quando selecionada)
+    if (state.selectedRowIds.has(record.id)) {
+      const resizer = createElement("div", "row-resizer");
+      resizer.type = "button";
+      resizer.setAttribute("aria-label", "Redimensionar altura da linha");
+
+      let startY = 0;
+      let startHeight = 26;
+      let resizing = false;
+
+      function applyRowHeight(px) {
+        const h = Math.max(26, px);
+        tr.style.minHeight = h + "px";
+        if (h > 26) {
+          state.rowHeights.set(record.id, h);
+          tr.classList.add("is-expanded");
+        } else {
+          state.rowHeights.delete(record.id);
+          tr.classList.remove("is-expanded");
+        }
+      }
+
+      function onMove(e) {
+        if (!resizing) return;
+        const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        applyRowHeight(startHeight + (clientY - startY));
+      }
+
+      function onUp() {
+        resizing = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.removeEventListener("touchmove", onMove);
+        document.removeEventListener("touchend", onUp);
+      }
+
+      function onDown(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        resizing = true;
+        startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        startHeight = tr.offsetHeight || 26;
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+        document.addEventListener("touchmove", onMove, { passive: false });
+        document.addEventListener("touchend", onUp);
+      }
+
+      resizer.addEventListener("mousedown", onDown);
+      resizer.addEventListener("touchstart", onDown, { passive: false });
+
+      // Duplo clique na alça: volta ao padrão compacto
+      resizer.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        state.rowHeights.delete(record.id);
+        tr.style.minHeight = "";
+        tr.classList.remove("is-expanded");
+      });
+
+      tr.appendChild(resizer);
+    }
+
     tableBody.appendChild(tr);
   }
 
   /* -------------------------------------------------------------
-     MENU DE CONTEXTO E MODO SELEÇÃO
+     MODO SELEÇÃO
      ------------------------------------------------------------- */
-  function openContextMenu(x, y, record) {
-    activeContextRecord = record;
-    renderTable(); // destaca a linha com classe context-focus-row
-
-    rowContextMenu.hidden = false;
-
-    const menuWidth = 170;
-    const menuHeight = 90;
-    let posX = x;
-    let posY = y;
-    if (posX + menuWidth > window.innerWidth) posX = window.innerWidth - menuWidth - 10;
-    if (posY + menuHeight > window.innerHeight) posY = window.innerHeight - menuHeight - 10;
-    if (posX < 10) posX = 10;
-    if (posY < 10) posY = 10;
-
-    rowContextMenu.style.left = posX + "px";
-    rowContextMenu.style.top = posY + "px";
-  }
-
-  function closeContextMenu() {
-    rowContextMenu.hidden = true;
-    if (activeContextRecord) {
-      activeContextRecord = null;
-      renderTable();
-    }
-  }
 
   function toggleRowSelection(recordId) {
     if (state.selectedRowIds.has(recordId)) {
@@ -1086,41 +1138,6 @@
     state.selectedRowIds.clear();
     renderTable();
     notify(records.length + " linha(s) duplicada(s) como pendente(s). Salve para gravar.");
-  }
-
-  function adjustSelectedRowHeights(delta) {
-    if (state.selectedRowIds.size === 0) return;
-    state.selectedRowIds.forEach((id) => {
-      const current = state.rowHeights.get(id) || 26;
-      const next = Math.max(26, current + delta);
-      if (next <= 26) {
-        state.rowHeights.delete(id);
-      } else {
-        state.rowHeights.set(id, next);
-      }
-    });
-    applyRowHeightsToDom();
-  }
-
-  function resetSelectedRowHeights() {
-    if (state.selectedRowIds.size === 0) return;
-    state.selectedRowIds.forEach((id) => state.rowHeights.delete(id));
-    applyRowHeightsToDom();
-  }
-
-  function applyRowHeightsToDom() {
-    state.selectedRowIds.forEach((id) => {
-      const tr = tableBody.querySelector('tr[data-record-id="' + id + '"]');
-      if (!tr) return;
-      const h = state.rowHeights.get(id);
-      if (h && h > 26) {
-        tr.style.minHeight = h + "px";
-        tr.classList.add("is-expanded");
-      } else {
-        tr.style.minHeight = "";
-        tr.classList.remove("is-expanded");
-      }
-    });
   }
 
   /* -------------------------------------------------------------
@@ -2174,32 +2191,10 @@
       }
     });
 
-    // Context Menu Items
-    byId("context-select-row").addEventListener("click", () => {
-      if (activeContextRecord) {
-        state.selectionMode = true;
-        state.selectedRowIds.add(activeContextRecord.id);
-        closeContextMenu();
-        renderTable();
-      }
-    });
-    byId("context-duplicate-row").addEventListener("click", () => {
-      if (activeContextRecord) {
-        const rec = activeContextRecord;
-        closeContextMenu();
-        duplicateRecord(rec);
-      }
-    });
-
     // Floating Selection Bar
     byId("copy-selection-btn").addEventListener("click", copySelectedRows);
     byId("duplicate-selection-btn").addEventListener("click", duplicateSelectedRows);
     byId("clear-selection-btn").addEventListener("click", clearSelection);
-
-    // Altura da linha selecionada
-    byId("row-height-increase-btn").addEventListener("click", () => adjustSelectedRowHeights(40));
-    byId("row-height-decrease-btn").addEventListener("click", () => adjustSelectedRowHeights(-40));
-    byId("row-height-reset-btn").addEventListener("click", resetSelectedRowHeights);
 
     // Filtro por Coluna Eventos
     byId("close-column-filter").addEventListener("click", closeColumnFilterMenu);
@@ -2288,17 +2283,18 @@
       }
     });
 
-    // Fechar context menu ao clicar/tocar fora
-    document.addEventListener("click", (e) => {
-      if (!rowContextMenu.hidden && !rowContextMenu.contains(e.target)) {
-        closeContextMenu();
+    // Tecla Escape: limpa seleção de linha e/ou coluna quando não há modal/dialog aberto nem célula em edição
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      // Se houver modal/dialog aberto ou célula em edição, não faz nada
+      const hasOpenDialog = document.querySelector("dialog[open]") !== null;
+      if (hasOpenDialog || state.editingCell) return;
+      if (state.selectedRowIds.size > 0) {
+        clearSelection();
+      } else if (state.selectedColumn) {
+        deselectColumn();
       }
     });
-    document.addEventListener("touchstart", (e) => {
-      if (!rowContextMenu.hidden && !rowContextMenu.contains(e.target)) {
-        closeContextMenu();
-      }
-    }, { passive: true });
 
     // Manter thead sempre congelado no topo da viewport durante rolagem vertical da página
     window.addEventListener("scroll", () => {

@@ -305,16 +305,6 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   align-items: center;
   gap: 8px;
 }
-.selection-height-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.selection-height-group .height-label {
-  font-size: 11px;
-  color: var(--muted);
-}
-
 /* Cards */
 .controls-card, .table-card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
 .controls-card { padding: 16px 19px 13px; }
@@ -541,6 +531,44 @@ tbody tr.context-focus-row {
 }
 tbody tr.context-focus-row td {
   background: var(--accent-soft) !important;
+}
+
+/* Alça vertical de redimensionamento de linha (apenas quando selecionada) */
+tbody tr.selected-row {
+  position: relative;
+}
+tbody tr.selected-row td {
+  position: relative;
+}
+.row-resizer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: row-resize;
+  background: transparent;
+  z-index: 5;
+  display: none;
+}
+tbody tr.selected-row .row-resizer {
+  display: block;
+}
+.row-resizer::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.row-resizer:hover::before,
+.row-resizer.is-dragging::before {
+  opacity: 1;
+  background: var(--accent-dark);
 }
 
 /* Modo Leitura / Rígido (Padrão 1 linha compacta) vs Modo Edição (após duplo clique) */
@@ -859,45 +887,6 @@ td.is-editing textarea {
 .shortcut-actions-right {
   display: flex;
   gap: 8px;
-}
-
-/* Row Context Menu */
-.row-context-menu {
-  position: fixed;
-  z-index: 100;
-  min-width: 160px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  box-shadow: var(--shadow-popover);
-  padding: 6px 0;
-  display: flex;
-  flex-direction: column;
-}
-.row-context-menu[hidden] {
-  display: none !important;
-}
-.context-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.context-item:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.context-icon {
-  font-size: 13px;
-  color: var(--muted);
 }
 
 /* Filter Dropdown Popover (Google Sheets style) */

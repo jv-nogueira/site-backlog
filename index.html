@@ -102,12 +102,6 @@
         <button id="copy-selection-btn" class="button button-primary" type="button">📋 Copiar linhas</button>
         <button id="duplicate-selection-btn" class="button button-secondary" type="button">⧉ Duplicar linha(s)</button>
         <button id="clear-selection-btn" class="button button-secondary" type="button">Sair da seleção</button>
-        <div class="selection-height-group">
-          <span class="height-label">Altura da linha:</span>
-          <button id="row-height-increase-btn" class="button button-quiet" type="button">A+</button>
-          <button id="row-height-decrease-btn" class="button button-quiet" type="button">A-</button>
-          <button id="row-height-reset-btn" class="button button-quiet" type="button">Redefinir</button>
-        </div>
       </div>
     </div>
 
@@ -282,16 +276,6 @@
       </div>
     </form>
   </dialog>
-
-  <!-- Menu de Contexto Customizado de Linha -->
-  <div id="row-context-menu" class="row-context-menu" hidden>
-    <button id="context-select-row" class="context-item" type="button">
-      <span class="context-icon" aria-hidden="true">☑</span> Selecionar
-    </button>
-    <button id="context-duplicate-row" class="context-item" type="button">
-      <span class="context-icon" aria-hidden="true">⧉</span> Duplicar linha
-    </button>
-  </div>
 
   <form id="transport-form" class="sr-only" method="post" target="transport-frame">
     <input type="hidden" name="payload">
