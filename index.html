@@ -93,20 +93,6 @@
       </div>
     </section>
 
-    <!-- Barra Flutuante de Seleção Múltipla / Colunas -->
-    <div id="selection-bar" class="selection-bar" role="region" aria-label="Ações de seleção" hidden>
-      <div class="selection-info">
-        <span id="selection-count">0 linha(s) selecionada(s)</span>
-      </div>
-      <div class="selection-actions">
-        <button id="copy-selection-btn" class="button button-primary" type="button">📋 Copiar linhas</button>
-        <button id="duplicate-selection-btn" class="button button-secondary" type="button">⧉ Duplicar linha(s)</button>
-        <button id="wrap-selection-btn" class="button button-secondary" type="button">↕ Ajustar</button>
-        <button id="clip-selection-btn" class="button button-secondary" type="button">— Cortar</button>
-        <button id="clear-selection-btn" class="button button-secondary" type="button">Sair da seleção</button>
-      </div>
-    </div>
-
     <section class="card table-card" aria-label="Tarefas da Database">
       <div class="table-toolbar">
         <div class="result-summary">
@@ -129,6 +115,20 @@
     </section>
     <p class="footer-note">Uma visão simples e organizada do seu trabalho.</p>
   </main>
+
+  <!-- Barra Flutuante de Seleção Múltipla / Colunas (fixa no topo da viewport) -->
+  <div id="selection-bar" class="selection-bar" role="region" aria-label="Ações de seleção" hidden>
+    <div class="selection-info">
+      <span id="selection-count">0 linha(s) selecionada(s)</span>
+    </div>
+    <div class="selection-actions">
+      <button id="copy-selection-btn" class="button button-primary" type="button">📋 Copiar linhas</button>
+      <button id="duplicate-selection-btn" class="button button-secondary" type="button">⧉ Duplicar linha(s)</button>
+      <button id="wrap-selection-btn" class="button button-secondary" type="button">↕ Ajustar</button>
+      <button id="clip-selection-btn" class="button button-secondary" type="button">— Cortar</button>
+      <button id="clear-selection-btn" class="button button-secondary" type="button">Sair da seleção</button>
+    </div>
+  </div>
 
   <!-- Modal Adicionar Tarefa -->
   <dialog id="task-dialog" class="modal modal-wide">

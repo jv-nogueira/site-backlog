@@ -276,16 +276,21 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   border-color: var(--accent);
 }
 
-/* Floating Selection Bar */
+/* Floating Selection Bar: fixa no topo da viewport sem ocupar espaço no fluxo */
 .selection-bar {
-  position: sticky;
+  position: fixed;
   top: 12px;
-  z-index: 40;
-  margin: 10px 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1440px, calc(100% - 64px));
+  z-index: 60;
+  margin: 0;
   padding: 10px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   background: var(--surface);
   border: 1.5px solid var(--accent);
   border-radius: 10px;
@@ -303,7 +308,9 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -1.15px; }
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
+
 /* Cards */
 .controls-card, .table-card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
 .controls-card { padding: 16px 19px 13px; }
@@ -364,17 +371,15 @@ table {
   table-layout: fixed;
 }
 thead {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 6;
   background: var(--table-head-bg);
+  will-change: transform;
 }
 thead tr {
   background: var(--table-head-bg);
 }
 th {
-  position: sticky;
-  top: 0;
   background: var(--table-head-bg);
   padding: 8px 10px;
   color: var(--muted);
@@ -414,21 +419,18 @@ th.is-first-col, td.is-first-col {
 }
 
 /* ── Seleção de coluna ── */
-/* Cabeçalho selecionado */
 th.is-col-selected {
   background: var(--accent-soft);
   color: var(--accent);
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-/* Células da coluna selecionada */
 td.is-col-highlighted {
   background: var(--accent-soft) !important;
 }
 
 /* Col Resizer — botão circular ◄► visível SOMENTE na coluna selecionada */
 .col-resizer {
-  /* posicionado na borda direita do th */
   position: absolute;
   top: 50%;
   right: -13px;
@@ -445,13 +447,12 @@ td.is-col-highlighted {
   user-select: none;
   touch-action: none;
   z-index: 12;
-  display: none; /* oculto por padrão */
+  display: none;
   align-items: center;
   justify-content: center;
   box-shadow: 0 1px 4px rgba(0,0,0,.18);
   transition: background .12s, color .12s;
 }
-/* Aparece somente quando o th pai está selecionado */
 th.is-col-selected .col-resizer {
   display: flex;
 }
@@ -507,11 +508,10 @@ td {
   padding: 4px 8px;
   border-top: 1px solid var(--table-border);
   border-right: 1px solid var(--table-border);
-  vertical-align: top; /* top para que conteúdo expandido flua de cima para baixo */
+  vertical-align: top;
   background: var(--surface);
   overflow: hidden;
   user-select: none;
-  /* sem min-width: o redimensionamento é livre; o mínimo técnico vem do próprio conteúdo */
 }
 td:last-child {
   border-right: 0;
@@ -569,7 +569,7 @@ tbody tr.selected-row .row-resizer {
   background: var(--accent-dark);
 }
 
-/* Modo Leitura / Rígido (Padrão 1 linha compacta) vs Modo Edição (após duplo clique) */
+/* Modo Leitura / Rígido vs Modo Edição */
 .cell-readonly {
   display: block;
   position: relative;
@@ -580,10 +580,6 @@ tbody tr.selected-row .row-resizer {
   color: var(--input-color);
   border-radius: 4px;
   cursor: default;
-  /* Quebra o texto dentro da célula quando a coluna estiver estreita,
-     sem deixar o conteúdo vazar horizontalmente.
-     A altura fixa de 26px garante que a linha permaneça compacta:
-     linhas extras ficam ocultas (overflow: hidden) até o usuário expandir. */
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -622,8 +618,7 @@ td.is-col-wrapped .cell-readonly {
   max-height: none;
 }
 
-/* Linha explicitamente cortada: formato compacto,
-   sobrescreve is-col-wrapped e is-expanded dentro dessa linha */
+/* Linha explicitamente cortada */
 tbody tr.is-clipped .cell-readonly,
 tbody tr.is-clipped td.is-col-wrapped .cell-readonly {
   height: 26px !important;
@@ -661,7 +656,6 @@ th.drag-over-left {
 th.drag-over-right {
   box-shadow: inset -4px 0 0 var(--accent) !important;
 }
-
 
 /* Células em modo de edição */
 td.is-editing {
@@ -719,14 +713,11 @@ td.is-editing textarea {
 
 .project-cell { text-align: center; }
 
-/* Wrapper da checkbox de Projeto em modo leitura.
-   pointer-events:none na checkbox garante que todos os eventos
-   (incluindo dblclick) cheguem ao td, onde o listener está registrado. */
 .project-check-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none; /* delega eventos ao td pai */
+  pointer-events: none;
 }
 .project-check-wrap input[type="checkbox"] {
   pointer-events: none;
@@ -1037,6 +1028,7 @@ td.is-editing textarea {
 
 @media (max-width: 820px) {
   .app-shell { width: min(100% - 32px, 680px); }
+  .selection-bar { width: min(100% - 32px, 680px); top: 10px; padding: 10px 14px; }
   .page-heading { align-items: flex-start; flex-direction: column; }
   .heading-actions { flex-wrap: wrap; }
   .control-row { align-items: flex-start; flex-direction: column; gap: 13px; }
@@ -1049,6 +1041,7 @@ td.is-editing textarea {
 }
 @media (max-width: 480px) {
   .app-shell { width: calc(100% - 24px); }
+  .selection-bar { width: calc(100% - 24px); top: 8px; padding: 9px 12px; }
   .topbar { height: 68px; }
   .topbar-actions { gap: 8px; }
   .connection-status { max-width: 110px; font-size: 10px; }

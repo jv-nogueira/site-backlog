@@ -290,8 +290,6 @@
      REDIMENSIONAMENTO DE COLUNA PELO CABEÇALHO
      ------------------------------------------------------------- */
   function setupColumnResize(th, field) {
-    // Botão circular de redimensionar — visível e acionável apenas
-    // quando a coluna estiver selecionada (classe is-col-selected no th).
     const resizer = createElement("div", "col-resizer");
     resizer.setAttribute("aria-label", "Redimensionar largura da coluna");
     resizer.setAttribute("role", "button");
@@ -311,6 +309,7 @@
       th.style.width = newWidth + "px";
       th.style.minWidth = "";
       state.columnWidths[field] = newWidth;
+      updateStickyThead();
     }
 
     function onPointerUp() {
@@ -323,7 +322,6 @@
     }
 
     function onPointerDown(e) {
-      // Só age se a coluna estiver selecionada
       if (!state.selectedColumns.has(field)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -365,7 +363,6 @@
 
     if (isEditing) {
       cell.classList.add("is-editing");
-      // Renderiza input/select/textarea ativo
       if (field === "Categoria") {
         const wrap = createElement("div", "category-cell");
         if (subtask) wrap.classList.add("is-subtask");
@@ -379,7 +376,6 @@
       return cell;
     }
 
-    // Modo Leitura / Rígido (Padrão) - Ativa edição com dblclick
     cell.addEventListener("dblclick", (e) => {
       e.stopPropagation();
       state.editingCell = { recordId: record.id, field: field };
@@ -401,15 +397,12 @@
     }
 
     if (field === "Projeto") {
-      // Wrapper posiciona a checkbox e captura o dblclick de forma confiável.
-      // A checkbox fica com pointer-events:none para que todos os eventos
-      // (incluindo dblclick) cheguem ao td, onde o listener já está registrado.
       const wrap = createElement("div", "project-check-wrap");
       const chk = document.createElement("input");
       chk.type = "checkbox";
       chk.checked = Boolean(values.Projeto);
       chk.setAttribute("aria-label", "Projeto");
-      chk.tabIndex = -1; // foco gerenciado pelo td
+      chk.tabIndex = -1;
       wrap.appendChild(chk);
       cell.appendChild(wrap);
       return cell;
@@ -426,7 +419,6 @@
       return cell;
     }
 
-    // Campo de texto geral (Descrição / Observação etc.) — leitura; edição por duplo clique
     const rawVal = escapeText(values[field]);
     const readSpan = createElement("div", "cell-readonly", rawVal || "—");
     if (!rawVal) readSpan.classList.add("is-empty");
@@ -450,10 +442,8 @@
     if (field === "Projeto") {
       input = document.createElement("input");
       input.type = "checkbox";
-      // O dblclick que ativou este modo já constitui a intenção de alternar.
-      // Iniciamos com o valor alternado para que o primeiro clique/change salve.
       const originalVal = Boolean(values[field]);
-      input.checked = !originalVal; // já alternado pelo dblclick
+      input.checked = !originalVal;
       input.setAttribute("aria-label", "Projeto");
 
       let committed = false;
@@ -465,16 +455,13 @@
 
       input.addEventListener("change", commit);
       input.addEventListener("blur", () => {
-        // Se o usuário apenas focou e saiu sem clicar (raro), salva o estado atual
         if (!committed) commit();
       });
       input.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          committed = true; // evita commit no blur
+          committed = true;
           state.editingCell = null;
           renderTable();
-        } else if (e.key === "Enter" || e.key === " ") {
-          // Space/Enter alterna; deixa o evento default acontecer, depois commit via change
         }
       });
 
@@ -597,17 +584,14 @@
 
   function renderTableHead(columns) {
     tableHead.replaceChildren();
-    // dragSrcField shared across all th listeners via closure
     let dragSrcField = null;
 
     columns.forEach((field, index) => {
       const th = document.createElement("th");
       if (index === 0) th.classList.add("is-first-col");
       th.dataset.field = field;
-      // draggable only enabled when column is selected (set below in click handler)
       th.draggable = false;
 
-      // Reflect current selection state
       if (state.selectedColumns.has(field)) th.classList.add("is-col-selected");
 
       if (state.columnWidths[field]) {
@@ -619,27 +603,22 @@
       const label = createElement("span", "th-label", getColumnLabel(field));
       label.title = "Clique direito para selecionar · Duplo clique para renomear";
 
-      // ── Clique simples: não seleciona mais coluna (seleção agora via clique direito)
       th.addEventListener("click", (e) => {
         if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
         e.stopPropagation();
       });
 
-      // ── Clique direito: seleciona/desseleciona a coluna (ativa resize + drag)
       th.addEventListener("contextmenu", (e) => {
         if (e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input") || e.target.closest(".col-resizer")) return;
         e.preventDefault();
         e.stopPropagation();
         if (state.selectedColumns.has(field)) {
-          // Deseleciona esta coluna
           state.selectedColumns.delete(field);
           th.classList.remove("is-col-selected");
           th.draggable = false;
           applyColumnHighlight(field, false);
           updateSelectionBar();
         } else {
-          // Adiciona ao Set de colunas selecionadas
-          // Limpa seleção de linha quando uma coluna é selecionada
           if (state.selectedRowIds.size > 0) {
             state.selectionMode = false;
             state.selectedRowIds.clear();
@@ -647,13 +626,12 @@
           }
           state.selectedColumns.add(field);
           th.classList.add("is-col-selected");
-          th.draggable = true; // libera drag nativo para reordenar
+          th.draggable = true;
           applyColumnHighlight(field, true);
           updateSelectionBar();
         }
       });
 
-      // ── Duplo clique no label: renomear
       label.addEventListener("dblclick", (e) => {
         e.stopPropagation();
         th.draggable = false;
@@ -689,7 +667,6 @@
 
       content.appendChild(label);
 
-      // ── Botão de filtro
       const filterBtn = createElement("button", "col-filter-btn", "▼");
       filterBtn.type = "button";
       filterBtn.title = "Filtrar por " + getColumnLabel(field);
@@ -709,7 +686,6 @@
       content.appendChild(filterBtn);
       th.appendChild(content);
 
-      // ── Drag nativo (desktop reorder) — só funciona quando th.draggable=true (coluna selecionada)
       th.addEventListener("dragstart", (e) => {
         if (!state.selectedColumns.has(field)) { e.preventDefault(); return; }
         if (e.target.closest(".col-resizer") || e.target.closest(".col-filter-btn") || e.target.closest(".th-rename-input")) {
@@ -741,7 +717,6 @@
         const rect = th.getBoundingClientRect();
         const placeAfter = (e.clientX - rect.left) > (rect.width / 2);
         reorderColumn(dragSrcField, field, placeAfter);
-        // mantém coluna selecionada após reordenar (já está no Set)
       });
 
       th.addEventListener("dragend", () => {
@@ -751,10 +726,7 @@
         });
       });
 
-      // ── Touch reorder (mobile) — só quando coluna selecionada
       setupTouchReorder(th, field, columns);
-
-      // ── Resize handle (circular, visível só quando selecionada via CSS)
       setupColumnResize(th, field);
 
       tableHead.appendChild(th);
@@ -766,7 +738,6 @@
 
   /* ── Helpers de seleção de coluna ── */
 
-  /** Remove todas as colunas selecionadas */
   function clearColumnSelection() {
     if (state.selectedColumns.size === 0) return;
     state.selectedColumns.forEach((f) => {
@@ -779,15 +750,11 @@
     });
   }
 
-  /** Alias para compatibilidade com código legado que chamava deselectColumn() */
   function deselectColumn() {
     clearColumnSelection();
   }
 
   function applyColumnHighlight(field, on) {
-    // Aplica/remove APENAS is-col-highlighted — nunca toca em is-col-wrapped,
-    // que é estado independente da seleção e gerenciado exclusivamente por
-    // applyAllColumnWraps() / clipSelection().
     const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
     const index = visibleCols.indexOf(field);
     if (index === -1) return;
@@ -798,7 +765,6 @@
     });
   }
 
-  /** Reaplica is-col-wrapped em todas as colunas wrapped */
   function applyAllColumnWraps() {
     const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
     state.wrappedColumns.forEach((field) => {
@@ -833,7 +799,6 @@
       if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
         dragging = true;
         th.classList.add("is-dragging-col");
-        // Ghost visual
         ghost = createElement("div", "col-drag-ghost", getColumnLabel(field));
         document.body.appendChild(ghost);
       }
@@ -843,7 +808,6 @@
       const y = e.touches[0].clientY;
       ghost.style.left = (x - 20) + "px";
       ghost.style.top  = (y - 16) + "px";
-      // Realça th de destino
       tableHead.querySelectorAll("th[data-field]").forEach((targetTh) => {
         const rect = targetTh.getBoundingClientRect();
         if (x >= rect.left && x <= rect.right) {
@@ -867,7 +831,6 @@
         targetTh.classList.remove("drag-over-left", "drag-over-right");
         if ((isLeft || isRight) && targetTh !== th) {
           reorderColumn(field, targetTh.dataset.field, isRight);
-          // selectedColumns já mantém o field após reordenar
         }
       });
     });
@@ -905,7 +868,6 @@
       emptyStateEl.hidden = true;
     } else {
       byId("result-count").textContent = visibleCount + (visibleCount === 1 ? " tarefa" : " tarefas");
-      // SÓ MOSTRA EMPTY-STATE SE REALMENTE HOUVER 0 TAREFAS VISÍVEIS APÓS CARREGAR
       emptyStateEl.hidden = (visibleCount > 0);
     }
 
@@ -913,16 +875,12 @@
     updatePendingControls();
     updateClearColumnFiltersBtn();
     updateSelectionBar();
-    // Reaplica destaque de todas as colunas selecionadas após re-render
     state.selectedColumns.forEach((f) => applyColumnHighlight(f, true));
-    // Reaplica is-col-wrapped em todas as colunas ajustadas
     applyAllColumnWraps();
-    // Reaplica is-expanded para linhas com wrap ativado
     state.wrappedRows.forEach((recordId) => {
       const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
       if (tr) tr.classList.add("is-expanded");
     });
-    // Reaplica is-clipped (sobrescreve is-expanded nas linhas explicitamente cortadas)
     state.clippedRows.forEach((recordId) => {
       const tr = tableBody.querySelector(`tr[data-record-id="${recordId}"]`);
       if (tr) {
@@ -931,6 +889,7 @@
         tr.classList.add("is-clipped");
       }
     });
+    updateStickyThead();
   }
 
   function appendRecordRow(record, columns, subtask, duplicateGroup, hiddenCount) {
@@ -942,24 +901,20 @@
     if (state.selectedRowIds.has(record.id)) tr.classList.add("selected-row");
     if (activeContextRecord && activeContextRecord.id === record.id) tr.classList.add("context-focus-row");
 
-    // Aplica altura customizada da linha, se houver (persiste entre re-renders)
     const savedHeight = state.rowHeights.get(record.id);
     if (savedHeight && savedHeight > 26) {
       tr.style.minHeight = savedHeight + "px";
       tr.classList.add("is-expanded");
     }
-    // Aplica is-expanded para linhas com wrap de texto ativado via botão Ajustar
     if (state.wrappedRows.has(record.id)) {
       tr.classList.add("is-expanded");
     }
-    // is-clipped sobrescreve is-expanded: linha explicitamente cortada fica compacta
     if (state.clippedRows.has(record.id)) {
       tr.classList.remove("is-expanded");
       tr.style.minHeight = "";
       tr.classList.add("is-clipped");
     }
 
-    // Click in selection mode toggles selection
     tr.addEventListener("click", (e) => {
       if (state.selectionMode && !e.target.closest("button") && !e.target.closest("select") && !e.target.closest(".is-editing")) {
         deselectColumn();
@@ -967,16 +922,13 @@
       }
     });
 
-    // Context menu (clique direito) na linha: seleciona/altera seleção diretamente, sem menu flutuante
     tr.addEventListener("contextmenu", (e) => {
-      // Se estiver editando uma célula, permite o menu nativo do navegador
       if (e.target.closest(".is-editing") || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") {
         return;
       }
       e.preventDefault();
       state.selectionMode = true;
       if (state.selectedRowIds.has(record.id) && state.selectedRowIds.size > 1) {
-        // Alterna: se já selecionada e houver mais de uma, remove
         state.selectedRowIds.delete(record.id);
         if (state.selectedRowIds.size === 0) state.selectionMode = false;
       } else {
@@ -986,7 +938,6 @@
       renderTable();
     });
 
-    // Touch long press mobile: seleciona a linha diretamente, sem abrir menu de contexto
     tr.addEventListener("touchstart", (e) => {
       if (e.target.closest(".is-editing")) {
         return;
@@ -1029,7 +980,6 @@
         });
         wrap.append(button);
 
-        // Edição de categoria com dblclick
         const isEditing = state.editingCell && state.editingCell.recordId === record.id && state.editingCell.field === field;
         if (isEditing) {
           cell.classList.add("is-editing");
@@ -1058,7 +1008,6 @@
     action.setAttribute("aria-hidden", "true");
     tr.appendChild(action);
 
-    // Alça vertical de redimensionamento de linha (apenas quando selecionada)
     if (state.selectedRowIds.has(record.id)) {
       const resizer = createElement("div", "row-resizer");
       resizer.type = "button";
@@ -1080,6 +1029,7 @@
           state.rowHeights.delete(record.id);
           tr.classList.remove("is-expanded");
         }
+        updateStickyThead();
       }
 
       function onMove(e) {
@@ -1111,13 +1061,13 @@
       resizer.addEventListener("mousedown", onDown);
       resizer.addEventListener("touchstart", onDown, { passive: false });
 
-      // Duplo clique na alça: volta ao padrão compacto
       resizer.addEventListener("dblclick", (e) => {
         e.preventDefault();
         e.stopPropagation();
         state.rowHeights.delete(record.id);
         tr.style.minHeight = "";
         tr.classList.remove("is-expanded");
+        updateStickyThead();
       });
 
       tr.appendChild(resizer);
@@ -1127,8 +1077,40 @@
   }
 
   /* -------------------------------------------------------------
-     MODO SELEÇÃO
+     MODO SELEÇÃO & CABEÇALHO CONGELADO COM COMPENSAÇÃO DA BARRA
      ------------------------------------------------------------- */
+
+  function getSelectionBarOffset() {
+    const bar = byId("selection-bar");
+    if (!bar || bar.hidden) return 0;
+    const style = window.getComputedStyle(bar);
+    if (style.display === "none" || style.visibility === "hidden") return 0;
+    const rect = bar.getBoundingClientRect();
+    // Distância da borda inferior da barra até o topo da viewport + margem de respiro
+    return Math.ceil(rect.bottom + 8);
+  }
+
+  function updateStickyThead() {
+    const thead = tableHead ? tableHead.parentElement : null;
+    const tableEl = thead ? thead.parentElement : null;
+    if (!thead || !tableEl) return;
+
+    const topOffset = getSelectionBarOffset();
+    const rect = tableEl.getBoundingClientRect();
+    const theadHeight = thead.offsetHeight || 0;
+
+    // Quanto o topo da tabela está acima do ponto permitido (topOffset)
+    const desiredOffset = topOffset - rect.top;
+    // Limite máximo para não empurrar o cabeçalho além da base da tabela
+    const maxOffset = Math.max(0, rect.height - theadHeight);
+    const clampedOffset = Math.min(Math.max(0, desiredOffset), maxOffset);
+
+    if (clampedOffset > 0) {
+      thead.style.transform = `translateY(${clampedOffset}px)`;
+    } else {
+      thead.style.transform = "";
+    }
+  }
 
   function toggleRowSelection(recordId) {
     if (state.selectedRowIds.has(recordId)) {
@@ -1169,6 +1151,8 @@
       if (copyBtn) copyBtn.hidden = false;
       if (dupBtn) dupBtn.hidden = false;
     }
+
+    requestAnimationFrame(updateStickyThead);
   }
 
   function copySelectedRows() {
@@ -1205,12 +1189,10 @@
 
   function wrapSelection() {
     if (state.selectedColumns.size > 0) {
-      // Ajusta texto nas colunas selecionadas (não afeta linhas)
       state.selectedColumns.forEach((field) => state.wrappedColumns.add(field));
       applyAllColumnWraps();
+      updateStickyThead();
     } else if (state.selectedRowIds.size > 0) {
-      // Ajusta texto nas linhas selecionadas:
-      // remove de clippedRows (exceção compacta) e adiciona a wrappedRows
       state.selectedRowIds.forEach((recordId) => {
         state.clippedRows.delete(recordId);
         state.wrappedRows.add(recordId);
@@ -1220,12 +1202,12 @@
           tr.classList.add("is-expanded");
         }
       });
+      updateStickyThead();
     }
   }
 
   function clipSelection() {
     if (state.selectedColumns.size > 0) {
-      // Retorna APENAS as colunas selecionadas ao formato compactado (não toca em linhas)
       state.selectedColumns.forEach((field) => {
         state.wrappedColumns.delete(field);
         const visibleCols = state.columnOrder.filter((f) => state.visibleColumns.has(f));
@@ -1236,10 +1218,8 @@
           if (td) td.classList.remove("is-col-wrapped");
         });
       });
+      updateStickyThead();
     } else if (state.selectedRowIds.size > 0) {
-      // Retorna linhas selecionadas ao formato compactado:
-      // adiciona a clippedRows (exceção), remove de wrappedRows e rowHeights
-      // NÃO altera wrappedColumns — a coluna continua ajustada para as outras linhas
       state.selectedRowIds.forEach((recordId) => {
         state.wrappedRows.delete(recordId);
         state.rowHeights.delete(recordId);
@@ -1251,6 +1231,7 @@
           tr.classList.add("is-clipped");
         }
       });
+      updateStickyThead();
     }
   }
 
@@ -1440,7 +1421,6 @@
     });
     total += state.shortcutDeletes.size;
 
-    // + 1 por cada coluna renomeada e + 1 se a ordem das colunas mudou
     total += Object.keys(state.pendingColumnRenames).length;
     if (state.columnOrderChanged) total += 1;
 
@@ -1644,7 +1624,6 @@
         state.creates.clear();
         state.loaded = true;
 
-        // Process column order and labels from sheet
         if (Array.isArray(response.columns) && response.columns.length > 0) {
           const order = [];
           const labels = {};
@@ -1652,7 +1631,6 @@
             if (col && col.canonical && FIELDS.includes(col.canonical)) {
               order.push(col.canonical);
               labels[col.canonical] = col.label || col.canonical;
-              // Aplica largura da planilha somente se ainda não foi redimensionada pelo usuário
               if (col.width && col.width > 0 && !state.columnWidths[col.canonical]) {
                 state.columnWidths[col.canonical] = col.width;
               }
@@ -1670,7 +1648,6 @@
           state.columnOrderChanged = false;
         }
 
-        // Process shortcuts with robust parsing & active fallback
         if (Array.isArray(response.shortcuts) && response.shortcuts.length > 0) {
           state.shortcuts = response.shortcuts.map((sc) => {
             const rawFields = sc.fields || {};
@@ -1686,7 +1663,6 @@
             };
           });
         } else if (state.shortcuts.length === 0) {
-          // Fallback para atalhos padrão conforme a planilha do usuário (Compra e Teste)
           state.shortcuts = [
             {
               id: makeId(),
@@ -1874,7 +1850,6 @@
   function applyShortcut(shortcut) {
     const f = shortcut.fields;
 
-    // 1. Categorias filtradas
     const rawCats = String(f["Categorias-Filtradas"] || "").trim();
     if (rawCats) {
       const allowedCats = new Set(rawCats.split(",").map((s) => s.trim()).filter(Boolean));
@@ -1883,7 +1858,6 @@
       state.columnFilters.delete("Categoria");
     }
 
-    // 2. Projetos / Não projetos
     const proj = String(f["Apenas-Projetos"] || "").trim().toUpperCase();
     if (proj === "TRUE" || proj === "VERDADEIRO") {
       byId("filter-projects-true").checked = true;
@@ -1896,7 +1870,6 @@
       byId("filter-projects-false").checked = true;
     }
 
-    // 3. Status selecionados
     const rawStatus = String(f["Status-Selecionados"] || "").trim();
     const statusInputs = document.querySelectorAll('input[name="status-filter"]');
     if (rawStatus) {
@@ -1910,24 +1883,20 @@
       });
     }
 
-    // 4. Categorias duplicadas — vazio (ou qualquer valor diferente de TRUE/VERDADEIRO) desliga explicitamente
     const rawDup = String(f["Categorias-Duplicadas"] || "").trim().toUpperCase();
     byId("group-categories").checked = rawDup === "TRUE" || rawDup === "VERDADEIRO";
 
-    // 5. Colunas (quando definidas, aplicar exatamente essas colunas na ordem configurada)
     const rawCols = String(f["Colunas"] || "").trim();
     if (rawCols) {
       const cols = rawCols.split(",").map((s) => s.trim()).filter((col) => FIELDS.includes(col));
       if (cols.length > 0) {
         state.visibleColumns = new Set(cols);
-        // Reordenar: colunas do atalho primeiro (na ordem), depois as restantes
         const remaining = FIELDS.filter((field) => !cols.includes(field));
         state.columnOrder = cols.concat(remaining);
         localStorage.setItem(COLUMN_KEY, JSON.stringify(cols));
         renderColumnOptions();
       }
     }
-    // Quando Colunas está vazio, NÃO altera as colunas visíveis atuais
 
     state.activeShortcutId = shortcut.id;
     state.expanded.clear();
@@ -1956,7 +1925,6 @@
 
     byId("shortcut-name-input").value = fields["Nome-Button"] || "";
 
-    // Preencher checkboxes de Apenas Projetos
     const projVal = String(fields["Apenas-Projetos"] || "").trim().toUpperCase();
     if (projVal === "TRUE" || projVal === "VERDADEIRO") {
       byId("shortcut-projects-true").checked = true;
@@ -1965,12 +1933,10 @@
       byId("shortcut-projects-true").checked = false;
       byId("shortcut-projects-false").checked = true;
     } else {
-      // Vazio = ambas marcadas (padrão)
       byId("shortcut-projects-true").checked = true;
       byId("shortcut-projects-false").checked = true;
     }
 
-    // Preencher checkbox de Categorias Duplicadas
     const dupVal = String(fields["Categorias-Duplicadas"] || "").trim().toUpperCase();
     byId("shortcut-duplicate-checkbox").checked = (dupVal === "TRUE" || dupVal === "VERDADEIRO");
 
@@ -2106,7 +2072,6 @@
     const name = byId("shortcut-name-input").value.trim();
     if (!name) return;
 
-    // Bloqueio: pelo menos uma coluna deve estar marcada
     const selectedColsArr = Array.from(document.querySelectorAll('input[name="shortcut-col"]:checked'));
     if (selectedColsArr.length === 0) {
       notify("É necessário selecionar pelo menos uma coluna.", true);
@@ -2116,15 +2081,12 @@
     const cats = Array.from(state.shortcutSelectedCategories).join(", ");
     const active = byId("shortcut-active-switch").checked;
 
-    // Ler checkboxes de Apenas Projetos
     const projTrue = byId("shortcut-projects-true").checked;
     const projFalse = byId("shortcut-projects-false").checked;
     let onlyProj = "";
     if (projTrue && !projFalse) onlyProj = "TRUE";
     else if (!projTrue && projFalse) onlyProj = "FALSE";
-    // Se ambas marcadas → vazio (opção 2)
 
-    // Ler checkbox de Categorias Duplicadas
     const dupCats = byId("shortcut-duplicate-checkbox").checked ? "TRUE" : "FALSE";
 
     const selectedStatus = Array.from(document.querySelectorAll('input[name="shortcut-status"]:checked'))
@@ -2224,7 +2186,6 @@
       button.addEventListener("click", () => closeDialog(byId(button.dataset.close)));
     });
 
-    // Submissão de Nova Tarefa
     byId("task-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -2247,14 +2208,12 @@
       notify("Tarefa adicionada à lista. Salve para gravar na planilha.");
     });
 
-    // Submissão de Status
     byId("status-form").addEventListener("submit", (event) => {
       event.preventDefault();
       applyStatusChange();
     });
     byId("cancel-status").addEventListener("click", cancelStatusChange);
 
-    // Modal Conflito de Categoria
     byId("close-category-conflict").addEventListener("click", () => closeDialog(byId("category-conflict-dialog")));
     byId("cat-apply-single").addEventListener("click", () => {
       if (state.categoryConflict) {
@@ -2292,7 +2251,6 @@
       }
     });
 
-    // Modal Confirmação Salvar Múltiplas Linhas
     byId("close-save-confirm").addEventListener("click", () => closeDialog(byId("save-confirm-dialog")));
     byId("cancel-save-confirm").addEventListener("click", () => closeDialog(byId("save-confirm-dialog")));
     byId("proceed-save-confirm").addEventListener("click", () => {
@@ -2300,7 +2258,6 @@
       executeSave();
     });
 
-    // Atalhos
     byId("create-shortcut-btn").addEventListener("click", () => openShortcutForm(null));
     byId("shortcut-form").addEventListener("submit", (e) => {
       e.preventDefault();
@@ -2309,7 +2266,6 @@
     byId("delete-shortcut-btn").addEventListener("click", deleteShortcut);
     setupShortcutCategoryDropdown();
 
-    // Bloqueio de checkboxes de Projetos na modal de atalho (não permitir ambas desmarcadas)
     const scProjTrue = byId("shortcut-projects-true");
     const scProjFalse = byId("shortcut-projects-false");
     const handleShortcutProjectChange = (changedCb) => {
@@ -2321,7 +2277,6 @@
     scProjTrue.addEventListener("change", () => handleShortcutProjectChange(scProjTrue));
     scProjFalse.addEventListener("change", () => handleShortcutProjectChange(scProjFalse));
 
-    // Bloqueio de checkboxes de colunas na modal de atalho (não permitir todas desmarcadas)
     byId("shortcut-columns-checks").addEventListener("change", (e) => {
       if (e.target.name !== "shortcut-col") return;
       const checked = document.querySelectorAll('input[name="shortcut-col"]:checked');
@@ -2404,12 +2359,15 @@
       }
     });
 
-    // Desselecionar colunas ao clicar fora do thead e da barra de seleção
+    // Desmarcar linha(s) e/ou coluna(s) ao clicar fora da tabela e fora da barra de seleção
     document.addEventListener("click", (e) => {
-      if (state.selectedColumns.size > 0 && !e.target.closest("thead") && !e.target.closest("#selection-bar")) {
-        clearColumnSelection();
-        updateSelectionBar();
-      }
+      const hasSelection =
+        state.selectionMode ||
+        state.selectedRowIds.size > 0 ||
+        state.selectedColumns.size > 0;
+      if (!hasSelection) return;
+      if (e.target.closest("table") || e.target.closest("#selection-bar")) return;
+      clearSelection();
     });
 
     // Fechar seletor "Colunas" e "Projetos" ao clicar fora
@@ -2427,26 +2385,16 @@
     // Tecla Escape: limpa seleção de linha e/ou coluna quando não há modal/dialog aberto nem célula em edição
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      // Se houver modal/dialog aberto ou célula em edição, não faz nada
       const hasOpenDialog = document.querySelector("dialog[open]") !== null;
       if (hasOpenDialog || state.editingCell) return;
-      if (state.selectedRowIds.size > 0 || state.selectedColumns.size > 0) {
+      if (state.selectedRowIds.size > 0 || state.selectedColumns.size > 0 || state.selectionMode) {
         clearSelection();
       }
     });
 
-    // Manter thead sempre congelado no topo da viewport durante rolagem vertical da página
-    window.addEventListener("scroll", () => {
-      const thead = tableHead.parentElement;
-      const tableEl = thead ? thead.parentElement : null;
-      if (!thead || !tableEl) return;
-      const rect = tableEl.getBoundingClientRect();
-      if (rect.top < 0 && rect.bottom > thead.offsetHeight) {
-        thead.style.transform = `translateY(${Math.abs(rect.top)}px)`;
-      } else {
-        thead.style.transform = "";
-      }
-    }, { passive: true });
+    // Manter thead congelado no topo da viewport (e abaixo da barra flutuante quando visível)
+    window.addEventListener("scroll", updateStickyThead, { passive: true });
+    window.addEventListener("resize", updateStickyThead);
 
     setupCategoryAutocomplete();
   }
